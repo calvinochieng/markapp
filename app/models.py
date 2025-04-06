@@ -234,10 +234,10 @@ def update_payroll_manager(sender, instance, **kwargs):
     if not loaders:
         # No loaders, ensure turnboy is also a loader
         update_payroll_manager(turnboy, turnboy_pay, per_loader_pay)
-        LoaderAssignment.objects.update_or_create(
-            delivery=instance,
-            loader=turnboy,
-        )
+        # LoaderAssignment.objects.update_or_create(
+        #     delivery=instance,
+        #     loader=turnboy,
+        # )
     else:
         for loader in loaders:
             if loader == turnboy:

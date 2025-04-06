@@ -3,17 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Internal Delivery Management System</title>
+  <title>{% block title %}Internal Delivery Management System{% endblock title %}</title>
   
   <!-- Dependencies -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.2/css/bulma.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&display=swap">
 
   <style>
     body {
       font-family: 'Montserrat', sans-serif;
-      background: #f8f9fa;
+      {% comment %} background: #f8f9fa; {% endcomment %}
       min-height: 100vh;
       display: flex;
       flex-direction: column;
@@ -25,7 +25,7 @@
     }
 
     .login-box {
-      background: white;
+      background: #14161a;
       border-radius: 8px;
       box-shadow: 0 2px 12px rgba(0,0,0,0.08);
       max-width: 400px;
@@ -34,84 +34,85 @@
     }
 
     .system-name {
-      color: #2c3e50;
       font-weight: 600;
       margin-bottom: 1.5rem;
     }
 
     .footer {
-      background: #2c3e50;
+      background: #14161a;
       color: white;
       padding: 1.5rem;
       margin-top: auto;
     }
   </style>
+    {% block custom_style %} {% endblock custom_style %}
 </head>
 <body>
 
     <nav class="navbar" role="navigation" aria-label="main navigation">
         <div class="container">
-            <div class="navbar-brand">
-                <a class="navbar-item" href="/">
-                    <span class="has-text-weight-bold is-size-5 has-text-link">
-                        <i class="fas fa-truck-loading mr-2"></i>
-                        <span class="is-hidden-mobile"> DELIVERY MANAGER</span>
-                    </span>
+          <div class="navbar-brand">
+            <a class="navbar-item" href="#">
+              {% comment %} <span class="has-text-weight-bold">
+                <i class="fas fa-truck-moving mr-2"></i>DELIVERY PRO
+              </span> {% endcomment %}
+                <span class="has-text-weight-bold is-size-5 has-text-link">
+                    <i class="fas fa-truck-loading mr-2"></i><span class="is-hidden-mobile"> DELIVERY MANAGER</span>
+                </span>
+            </a>        
+            <a class="navbar-item" href="#">            
+                <button class="button is-danger is-rounded has-text-weight-bold py-4"
+                        onclick="window.location.href='/admin/app/monthlypayment/'">
+                    <i class="fas fa-file-invoice-dollar mr-2"></i>Generate Payroll
+                </button>
+            </a>
+            <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="navbarMenu">
+              <span aria-hidden="true"></span>
+              <span aria-hidden="true"></span>
+              <span aria-hidden="true"></span>
+            </a>
+          </div>
+    
+          <div id="navbarMenu" class="navbar-menu">
+            <div class="navbar-end">
+              <a class="navbar-item is-active" href="{% url 'dashboard' %}">
+                <i class="fas fa-home mr-2"></i> Dashboard
+              </a>
+              <a class="navbar-item" href="#">
+                <i class="fas fa-money-bill-wave mr-2"></i> Payroll
+              </a>
+              <div class="navbar-item has-dropdown is-hoverable">
+                <a class="navbar-link">
+                  <i class="fas fa-users-cog mr-2"></i> Management
                 </a>
-                <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="navbarMenu">
-                    <span aria-hidden="true"></span>
-                    <span aria-hidden="true"></span>
-                    <span aria-hidden="true"></span>
-                </a>
-            </div>
-
-            <div id="navbarMenu" class="navbar-menu">
-                <div class="navbar-end">
-                    <a class="navbar-item is-active" href="/dashboard/">
-                        <i class="fas has-text-link fa-home mr-2"></i> Dashboard
-                    </a>
-                    <div class="navbar-item has-dropdown is-hoverable">
-                    <a class="navbar-link">
-                        <i class="fas has-text-link fa-users-cog mr-2"></i> Management
-                    </a>
-                    <div class="navbar-dropdown">
-                        <a class="navbar-item" href="/admin/app/staff/">
-                        <i class="fas has-text-link fa-users mr-2"></i>Staff Management
-                        </a>
-                        <a class="navbar-item" href="/admin/app/vehicle/">
-                        <i class="fas has-text-link fa-truck mr-2"></i>Fleet Management
-                        </a>
-                        <hr class="navbar-divider">
-                        <a class="navbar-item" href="/admin/app/delivery/">
-                        <i class="fas has-text-link fa-clipboard-list mr-2"></i>Delivery Logs
-                        </a>
-                    </div>
-                    </div>
-                    <div class="navbar-item has-dropdown is-hoverable">
-                    <a class="navbar-link">
-                        <i class="fas has-text-link fa-user-cog mr-2"></i> Admin
-                    </a>
-                    <div class="navbar-dropdown">
-                        <a class="navbar-item" href="/admin/">
-                        <i class="fas fa-tools mr-2"></i>Admin Console
-                        </a>
-                        <div class="navbar-menu">
-                            {% if user.is_authenticated %}
-                            <div class="navbar-end">
-                                <div class="navbar-item">
-                                    <div class="buttons">
-                                        <a href="{% url 'logout' %}" class="button is-light">
-                                            Log Out
-                                        </a>
-                                    </div>
-                                </div>
-                            </div>
-                            {% endif %}
-                        </div>
-                    </div>
-                    </div>
+                <div class="navbar-dropdown">
+                  <a class="navbar-item" href="/admin/app/staff/">
+                    <i class="fas fa-users mr-2"></i>Staff Management
+                  </a>
+                  <a class="navbar-item" href="/admin/app/vehicle/">
+                    <i class="fas fa-truck mr-2"></i>Fleet Management
+                  </a>
+                  <hr class="navbar-divider">
+                  <a class="navbar-item" href="/admin/app/delivery/">
+                    <i class="fas fa-clipboard-list mr-2"></i>Delivery Logs
+                  </a>
                 </div>
+              </div>
+              <div class="navbar-item has-dropdown is-hoverable">
+                <a class="navbar-link">
+                  <i class="fas fa-user-cog mr-2"></i> Admin
+                </a>
+                <div class="navbar-dropdown">
+                  <a class="navbar-item" href="/admin/">
+                    <i class="fas fa-tools mr-2"></i>Admin Console
+                  </a>
+                  <a class="navbar-item" href="/admin/logout/">
+                    <i class="fas fa-sign-out-alt mr-2"></i>Logout
+                  </a>
+                </div>
+              </div>
             </div>
+          </div>
         </div>
     </nav>
 
