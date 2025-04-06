@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<main class="hero is-fullheight-with-navbar">
+    <div class="hero-body">
+        <div class="login-box">
+        <h2 class="title is-3 has-text-centered system-name">
+            Delivery Management Portal
+        </h2>
+
+        <div class="has-text-centered mb-4">
+            <i class="fas fa-truck-loading fa-3x has-text-link"></i>
+        </div>
+
+        <form class="login-form" action="{% url 'login' %}" method="post">
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="notification is-danger">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+            {% csrf_token %}
+            <div class="field">
+            <div class="control has-icons-left">
+                <input class="input" type="text" placeholder="Username">
+                <span class="icon is-small is-left">
+                <i class="fas fa-user"></i>
+                </span>
+            </div>
+            </div>
+
+            <div class="field">
+            <div class="control has-icons-left">
+                <input class="input" type="password" placeholder="Password">
+                <span class="icon is-small is-left">
+                <i class="fas fa-lock"></i>
+                </span>
+            </div>
+            </div>
+
+            <div class="field">
+            <button class="button is-link is-fullwidth">
+                Sign In
+            </button>
+            </div>
+
+            <div class="has-text-centered mt-4">
+            <a href="/admin/login/" class="has-text-grey">
+                <i class="fas has-text-link fa-sign-in-alt"></i>
+                Admin Login
+            </a>
+            </div>
+        </form>
+        </div>
+    </div>
+</main>
+{% endblock content %}

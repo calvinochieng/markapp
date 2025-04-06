@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Internal Delivery Management System</title>
+  
+  <!-- Dependencies -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&display=swap">
+
+  <style>
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background: #f8f9fa;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    main {
+      background-image:url('/static/delivery.jpg');
+        background-size: cover;
+    }
+
+    .login-box {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      max-width: 400px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+
+    .system-name {
+      color: #2c3e50;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+    }
+
+    .footer {
+      background: #2c3e50;
+      color: white;
+      padding: 1.5rem;
+      margin-top: auto;
+    }
+  </style>
+</head>
+<body>
+
+    <nav class="navbar" role="navigation" aria-label="main navigation">
+        <div class="container">
+            <div class="navbar-brand">
+                <a class="navbar-item" href="/">
+                    <span class="has-text-weight-bold is-size-5 has-text-link">
+                        <i class="fas fa-truck-loading mr-2"></i>
+                        <span class="is-hidden-mobile"> DELIVERY MANAGER</span>
+                    </span>
+                </a>
+                <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="navbarMenu">
+                    <span aria-hidden="true"></span>
+                    <span aria-hidden="true"></span>
+                    <span aria-hidden="true"></span>
+                </a>
+            </div>
+
+            <div id="navbarMenu" class="navbar-menu">
+                <div class="navbar-end">
+                    <a class="navbar-item is-active" href="/dashboard/">
+                        <i class="fas has-text-link fa-home mr-2"></i> Dashboard
+                    </a>
+                    <div class="navbar-item has-dropdown is-hoverable">
+                    <a class="navbar-link">
+                        <i class="fas has-text-link fa-users-cog mr-2"></i> Management
+                    </a>
+                    <div class="navbar-dropdown">
+                        <a class="navbar-item" href="/admin/app/staff/">
+                        <i class="fas has-text-link fa-users mr-2"></i>Staff Management
+                        </a>
+                        <a class="navbar-item" href="/admin/app/vehicle/">
+                        <i class="fas has-text-link fa-truck mr-2"></i>Fleet Management
+                        </a>
+                        <hr class="navbar-divider">
+                        <a class="navbar-item" href="/admin/app/delivery/">
+                        <i class="fas has-text-link fa-clipboard-list mr-2"></i>Delivery Logs
+                        </a>
+                    </div>
+                    </div>
+                    <div class="navbar-item has-dropdown is-hoverable">
+                    <a class="navbar-link">
+                        <i class="fas has-text-link fa-user-cog mr-2"></i> Admin
+                    </a>
+                    <div class="navbar-dropdown">
+                        <a class="navbar-item" href="/admin/">
+                        <i class="fas fa-tools mr-2"></i>Admin Console
+                        </a>
+                        <div class="navbar-menu">
+                            {% if user.is_authenticated %}
+                            <div class="navbar-end">
+                                <div class="navbar-item">
+                                    <div class="buttons">
+                                        <a href="{% url 'logout' %}" class="button is-light">
+                                            Log Out
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    {% block content %}
+    <!-- Main Content -->
+    <main class="hero is-fullheight-with-navbar">
+        <div class="hero-body">
+            <div class="login-box">
+            <h2 class="title is-3 has-text-centered system-name">
+                Delivery Management Portal
+            </h2>
+
+            <div class="has-text-centered mb-4">
+                <i class="fas fa-truck-loading fa-3x has-text-link"></i>
+            </div>
+
+            <form class="login-form">
+                {% csrf_token %}
+                <div class="field">
+                <div class="control has-icons-left">
+                    <input class="input" type="text" placeholder="Username">
+                    <span class="icon is-small is-left">
+                    <i class="fas fa-user"></i>
+                    </span>
+                </div>
+                </div>
+
+                <div class="field">
+                <div class="control has-icons-left">
+                    <input class="input" type="password" placeholder="Password">
+                    <span class="icon is-small is-left">
+                    <i class="fas fa-lock"></i>
+                    </span>
+                </div>
+                </div>
+
+                <div class="field">
+                <button class="button is-link is-fullwidth">
+                    Sign In
+                </button>
+                </div>
+
+                <div class="has-text-centered mt-4">
+                <a href="/admin/login/" class="has-text-grey">
+                    <i class="fas has-text-link fa-sign-in-alt"></i>
+                    Admin Login
+                </a>
+                </div>
+            </form>
+            </div>
+        </div>
+    </main>
+    {% endblock content %}
+
+    <!-- Simple Footer -->
+    <footer class="footer">
+        <div class="content has-text-centered">
+        <p>
+            <strong class="has-text-white-ter">Internal Delivery Management System</strong><br>
+            © 2025 Mark Logistics. For authorized use only.
+        </p>
+        </div>
+    </footer>
+
+  <script>
+    // Mobile menu toggle
+    document.addEventListener('DOMContentLoaded', () => {
+      const $navbarBurgers = Array.prototype.slice.call(document.querySelectorAll('.navbar-burger'), 0);
+      if ($navbarBurgers.length > 0) {
+        $navbarBurgers.forEach(el => {
+          el.addEventListener('click', () => {
+            const target = el.dataset.target;
+            const $target = document.getElementById(target);
+            el.classList.toggle('is-active');
+            $target.classList.toggle('is-active');
+          });
+        });
+      }
+    });
+    // Simple form submission handler
+    document.querySelector('.login-form').addEventListener('submit', function(e) {
+      e.preventDefault();
+      window.location.href = '/dashboard/'; // Redirect to actual dashboard
+    });
+  </script>
+</body>
+</html>

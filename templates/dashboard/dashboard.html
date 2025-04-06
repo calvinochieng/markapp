@@ -1,0 +1,318 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Delivery Management Dashboard</title>
+  
+  <!-- Bulma CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+  
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Montserrat Font -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap">
+  
+  <style>
+    :root {
+      --primary-color:rgb(0, 128, 255);
+      --secondary-color: #3498db;
+      --accent-color: #e74c3c;
+    }
+
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background-color: #f8f9fa;
+    }
+
+    .custom-navbar {
+      background-color: var(--primary-color);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+
+    .navbar-item, .navbar-link {
+      {% comment %} color: #fff !important; {% endcomment %}
+      transition: all 0.3s ease;
+    }
+
+    .navbar-item:hover, .navbar-link:hover {
+      background-color: rgba(255,255,255,0.1) !important;
+    }
+
+    .dashboard-card {
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .dashboard-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    }
+
+    .stat-number {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--primary-color);
+    }
+
+    .recent-deliveries {
+      max-height: 400px;
+      overflow-y: auto;
+      box-shadow: 0 0 0 rgba(0,0,0,0.1);
+    }
+
+    .section {
+      padding: 3rem 1.5rem;
+    }
+
+    .footer {
+      background-color: var(--primary-color);
+      color: #fff;
+      padding: 2rem 1.5rem;
+    }
+
+    @media screen and (max-width: 768px) {
+      .hero {
+        padding: 2rem 1rem;
+      }
+      
+      .stat-number {
+        font-size: 1.8rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar is-fixed-top" role="navigation" aria-label="main navigation">
+    <div class="container">
+      <div class="navbar-brand">
+        <a class="navbar-item" href="#">
+          {% comment %} <span class="has-text-weight-bold">
+            <i class="fas fa-truck-moving mr-2"></i>DELIVERY PRO
+          </span> {% endcomment %}
+            <span class="has-text-weight-bold is-size-5 has-text-link">
+                <i class="fas fa-truck-loading mr-2"></i> DELIVERY MANAGER
+            </span>
+        </a>
+        <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false" data-target="navbarMenu">
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
+          <span aria-hidden="true"></span>
+        </a>
+      </div>
+
+      <div id="navbarMenu" class="navbar-menu">
+        <div class="navbar-end">
+          <a class="navbar-item is-active" href="{% url 'dashboard' %}">
+            <i class="fas fa-home mr-2"></i> Dashboard
+          </a>
+          <a class="navbar-item" href="#">
+            <i class="fas fa-money-bill-wave mr-2"></i> Payroll
+          </a>
+          <div class="navbar-item has-dropdown is-hoverable">
+            <a class="navbar-link">
+              <i class="fas fa-users-cog mr-2"></i> Management
+            </a>
+            <div class="navbar-dropdown">
+              <a class="navbar-item" href="/admin/app/staff/">
+                <i class="fas fa-users mr-2"></i>Staff Management
+              </a>
+              <a class="navbar-item" href="/admin/app/vehicle/">
+                <i class="fas fa-truck mr-2"></i>Fleet Management
+              </a>
+              <hr class="navbar-divider">
+              <a class="navbar-item" href="/admin/app/delivery/">
+                <i class="fas fa-clipboard-list mr-2"></i>Delivery Logs
+              </a>
+            </div>
+          </div>
+          <div class="navbar-item has-dropdown is-hoverable">
+            <a class="navbar-link">
+              <i class="fas fa-user-cog mr-2"></i> Admin
+            </a>
+            <div class="navbar-dropdown">
+              <a class="navbar-item" href="/admin/">
+                <i class="fas fa-tools mr-2"></i>Admin Console
+              </a>
+              <a class="navbar-item" href="/admin/logout/">
+                <i class="fas fa-sign-out-alt mr-2"></i>Logout
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+    <section class="hero is-medium">
+    <div class="hero-body">
+        <div class="container">
+        <h1 class="title is-1 has-text-centered mb-6">Delivery Management Dashboard</h1>
+        
+        <!-- Stats Overview -->
+        <div class="columns is-multiline mb-6">
+            <div class="column is-3">
+            <div class="dashboard-card box has-background-white">
+                <p class="has-text-grey">Total Deliveries</p>
+                <p class="stat-number" id="total-deliveries">
+                {{total_deliveries}}
+                </p>
+                <p class="has-text-success"><i class="fas fa-arrow-up"></i> 12% from last month</p>
+            </div>
+            </div>
+            <div class="column is-3">
+            <div class="dashboard-card box has-background-white">
+                <p class="has-text-grey">Active Staff</p>
+                <p class="stat-number" id="active-staff">
+                {{active_staff}}
+                </p>
+                <p class="has-text-info">{{loaders_available}} Loaders Available</p>
+            </div>
+            </div>
+            <div class="column is-3">
+            <div class="dashboard-card box has-background-white">
+                <p class="has-text-grey">Loading/ Turnboy Expenses</p>
+                <p class="stat-number">Ksh <span id="total-salary">{{total_deliveries_amount}}/=</span></p>
+                <p class="has-text-warning">
+                    <span class="has-text-grey">Loading</span> : {{total_loading_amount}}/= 
+                    <span class="has-text-grey">Turnboy:</span> {{total_turnboy_payments}}/= 
+                </p>
+            </div>
+            </div>
+            <div class="column is-3">
+            <div class="dashboard-card box has-background-white">
+                <p class="has-text-grey">Active Vehicles</p>
+                <p class="stat-number" id="active-vehicles">{{active_vehicles}}</p>
+                <p class="has-text-danger">0 Under Maintenance</p>
+            </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="columns is-multiline is-centered">
+            <div class="column is-2">
+            <button class="button is-primary is-fullwidth has-text-weight-bold py-4" 
+                    onclick="window.location.href='/admin/app/delivery/add/'">
+                <i class="fas fa-plus-circle mr-2"></i>New Delivery
+            </button>
+            </div>
+            <div class="column is-2">
+            <button class="button is-info is-fullwidth has-text-weight-bold py-4"
+                    onclick="window.location.href='/admin/app/staff/add/'">
+                <i class="fas fa-user-plus mr-2"></i>Add Staff
+            </button>
+            </div>
+            <div class="column is-2">
+            <button class="button is-success is-fullwidth has-text-weight-bold py-4"
+                    onclick="window.location.href='/admin/app/monthlypayment/'">
+                <i class="fas fa-file-invoice-dollar mr-2"></i>Generate Payroll
+            </button>
+            </div>
+        </div>
+        </div>
+        <!-- Recent Deliveries Section -->   
+        <div class="mt-6">
+            <h2 class="title is-4 mb-4">Recent Deliveries</h2>
+            <div class="box recent-deliveries px-0">
+            <table class="table is-fullwidth is-hoverable">
+                <thead>
+                    <tr class="px-4">
+                        <th>Date</th>
+                        <th>Vehicle</th>
+                        <th>Driver</th>
+                        <th>Location</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <!-- Dynamic content would go here -->
+                {% for delivery in deliveries %}
+                    <tr>
+                        <td>{{delivery.date}}</td>
+                        <td>{{delivery.vehicle}}</td>
+                        <td>{{delivery.driver.name}}</td>
+                        <td>{{delivery.destination}}</td>
+                        <td>
+                            {% if delivery.status %}
+                            <span class="tag is-success">
+                                    Completed
+                                {% else %}
+                            <span class="tag is-warning">
+                                    Pending
+                                {% endif %}
+                            </span>
+                        </td>
+                        <td>
+                        <button class="button is-small is-info">View</button>
+                        <button class="button is-small is-warning">Edit</button>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div> 
+</div>
+    </section>
+
+ 
+    <section class="section">
+        <div style="margin-top: 20px;">
+            <h2>Payment Details</h2>
+            <table style="width:100%; border-collapse: collapse;">
+            <thead>
+                <tr>
+                <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Staff</th>
+                <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">Role</th>
+                <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Turnboy Payment</th>
+                <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Loader Payment</th>
+                <th style="border: 1px solid #ddd; padding: 8px; text-align: right;">Total</th>
+                <th style="border: 1px solid #ddd; padding: 8px; text-align: center;">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for payment in payments %}
+                <tr>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ payment.staff.name }}</td>
+                <td style="border: 1px solid #ddd; padding: 8px;">{{ payment.staff.get_role_display }}</td>
+                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">{{ payment.turnboy_payment|floatformat:2 }}</td>
+                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">{{ payment.loader_payment|floatformat:2 }}</td>
+                <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">{{ payment.total_payment|floatformat:2 }}</td>
+                <td style="border: 1px solid #ddd; padding: 8px; text-align: center;">
+                    {% if payment.is_paid %}
+                    <span style="color: green;">Paid</span>
+                    {% else %}
+                    <span style="color: red;">Unpaid</span>
+                    {% endif %}
+                </td>
+                </tr>
+                {% empty %}
+                <tr>
+                <td colspan="6" style="border: 1px solid #ddd; padding: 8px; text-align: center;">No payments found for {{ month_name }} {{ year }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            </table>
+        </div> 
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+    <div class="content has-text-centered">
+        <p>
+        <strong>Delivery Management</strong> by <a href="#">Mark Logistics</a>. 
+        © 2025 All rights reserved.
+        </p>
+    </div>
+    </footer>
+
+
+</body>
+</html>
+
