@@ -2052,3 +2052,51 @@ def update_payroll_manager(sender, instance, **kwargs):
         LoaderAssignment.objects.filter(delivery=instance).delete()
 ////// END MODEL DUMP ///////
 
+
+/////// SIGNAL DUMP ///////
+
+
+@receiver(post_save, sender=Delivery)
+@receiver(post_delete, sender=Delivery)
+def update_payroll_manager(sender, instance, **kwargs):    
+    turnboy = instance.turnboy
+    turnboy_pay = instance.turnboy_payment
+    loaders = instance.get_loaders()
+    per_loader_pay = instance.per_loader_amount() 
+
+    def update_payroll_manager(staff_local, turnboy_pay_local, per_loader_pay_local):
+        """Helper to update or create payroll records."""
+        PayrollManager.objects.update_or_create(
+            staff=staff_local,
+            delivery=instance,
+            defaults={
+                'turnboy_pay': turnboy_pay_local,
+                'loader_pay': per_loader_pay_local,
+            }
+        )  
+
+    if not loaders:
+        # No loaders, ensure turnboy is also a loader
+        update_payroll_manager(turnboy, turnboy_pay, per_loader_pay)
+        # LoaderAssignment.objects.update_or_create(
+        #     delivery=instance,
+        #     loader=turnboy,
+        # )
+    else:
+        for loader in loaders:
+            if loader == turnboy:
+                # If the loader is the turnboy, update both turnboy and loader pay
+                update_payroll_manager(loader, turnboy_pay, per_loader_pay)
+            else:
+                # If it's a regular loader, only update loader pay
+                update_payroll_manager(loader, 0, per_loader_pay)
+    
+    # Cleanup: Handle deletion of payroll and loader assignments when a delivery is deleted.
+    if isinstance(instance, Delivery) and kwargs.get('signal') == 'post_delete':
+        PayrollManager.objects.filter(delivery=instance).delete()
+        LoaderAssignment.objects.filter(delivery=instance).delete()
+
+
+
+/////// END SIGNAL DUMP /////
+

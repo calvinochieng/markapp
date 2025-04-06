@@ -6,7 +6,7 @@ from django.http import HttpResponse
 from django import forms
 from django.contrib import messages
 from django.db.models import Sum, Count
-from .models import Staff, Vehicle, Delivery, LoaderAssignment, MonthlyPayment
+from .models import Staff, Vehicle, Delivery, LoaderAssignment, MonthlyPayment, PayrollManager
 import csv
 from io import StringIO
 import calendar
@@ -20,6 +20,10 @@ class LoaderAssignmentInline(admin.TabularInline):
     model = LoaderAssignment
     extra = 1
     autocomplete_fields = ['loader']
+
+@admin.register(PayrollManager)
+class PayrollManagerAdmin(admin.ModelAdmin):
+    list_display = ('staff', 'delivery', 'turnboy_pay', 'loader_pay', 'total_pay', 'date_recorded')
 
 @admin.register(Delivery)
 class DeliveryAdmin(admin.ModelAdmin):

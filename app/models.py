@@ -99,7 +99,7 @@ class Delivery(models.Model):
         ('in_progress', 'In Progress'),
     ]
     
-    date = models.DateField(db_index=True)  # Added index for performance
+    date = models.DateField(db_index=True)
     delivery_note_image = models.ImageField(upload_to='delivery_notes/', blank=True, null=True)
     time = models.TimeField()
     vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, db_index=True)
@@ -126,26 +126,34 @@ class Delivery(models.Model):
         help_text="Total amount paid for loading"
     )
     notes = models.TextField(blank=True)
-    
+    turnboy_loaded = models.BooleanField(
+        default=False,
+        help_text="Set to True if the turnboy also helped with loading"
+    )
+
     class Meta:
         verbose_name_plural = "Deliveries"
         ordering = ['-date']
-    
+
     def __str__(self):
         return f"Delivery to {self.destination} on {self.date} - {self.vehicle.plate_number} (Driver: {self.driver.name}, Turnboy: {self.turnboy.name})"
-    
+
     def get_loaders(self):
         """Return a list of all loaders for this delivery"""
-        # Using prefetch_related would be more efficient in views for performance.
         return [assignment.loader for assignment in self.loaderassignment_set.all()]
-    
+
+    def total_loader_count(self):
+        """Include turnboy if they helped with loading"""
+        count = self.loaderassignment_set.count()
+        if self.turnboy_loaded:
+            count += 1
+        return count
+
     def per_loader_amount(self):
-        """Calculate amount paid to each loader"""
-        num_loaders = self.loaderassignment_set.count()
-        if num_loaders > 0:
-            return self.loading_amount / Decimal(num_loaders)
-        return Decimal('0.00')
-    
+        """Split loading money across actual loaders + turnboy if they helped"""
+        num = self.total_loader_count()
+        return self.loading_amount / Decimal(num) if num > 0 else Decimal('0.00')
+
 # ===================================================
 # LoaderAssignment Model
 # ===================================================
@@ -212,42 +220,55 @@ class PayrollManager(models.Model):
 # # ===================================================
 # # Signal Handler(s)
 # # ===================================================
+# Signal to update or create PayrollManager records when a LoaderAssignment is created or updated.
+# This ensures that the payroll is always in sync with the loader assignments.
+@receiver(post_save, sender=LoaderAssignment)
+def update_payroll_on_loader_assignment(sender, instance, **kwargs):
+    delivery = instance.delivery
+    loader = instance.loader
+    per_loader_pay = delivery.per_loader_amount()
+
+    # Check if loader is also turnboy
+    is_turnboy = loader == delivery.turnboy
+    turnboy_pay = delivery.turnboy_payment if is_turnboy else Decimal('0.00')
+
+    PayrollManager.objects.update_or_create(
+        staff=loader,
+        delivery=delivery,
+        defaults={
+            'turnboy_pay': turnboy_pay,
+            'loader_pay': per_loader_pay,
+        }
+    )
+# Signal to delete PayrollManager records when a LoaderAssignment is deleted.
+@receiver(post_delete, sender=LoaderAssignment)
+def delete_payroll_on_loader_remove(sender, instance, **kwargs):
+    # Clean up PayrollManager if loader is removed from delivery
+    PayrollManager.objects.filter(
+        staff=instance.loader,
+        delivery=instance.delivery
+    ).delete()
+
+# Signal to assign turnboy as loader if no loaders are assigned to the delivery.
+# This ensures that the turnboy is always included in the loader assignments if they are also a loader.
+
 @receiver(post_save, sender=Delivery)
-@receiver(post_delete, sender=Delivery)
-def update_payroll_manager(sender, instance, **kwargs):    
-    turnboy = instance.turnboy
-    turnboy_pay = instance.turnboy_payment
+def assign_turnboy_as_loader_if_needed(sender, instance, created, **kwargs):
     loaders = instance.get_loaders()
-    per_loader_pay = instance.per_loader_amount() 
 
-    def update_payroll_manager(staff_local, turnboy_pay_local, per_loader_pay_local):
-        """Helper to update or create payroll records."""
-        PayrollManager.objects.update_or_create(
-            staff=staff_local,
+    # If no loaders and turnboy is also a loader, assign them
+    if not loaders and instance.turnboy.is_loader:
+        LoaderAssignment.objects.get_or_create(
             delivery=instance,
-            defaults={
-                'turnboy_pay': turnboy_pay_local,
-                'loader_pay': per_loader_pay_local,
-            }
-        )  
+            loader=instance.turnboy
+        )
 
-    if not loaders:
-        # No loaders, ensure turnboy is also a loader
-        update_payroll_manager(turnboy, turnboy_pay, per_loader_pay)
-        # LoaderAssignment.objects.update_or_create(
-        #     delivery=instance,
-        #     loader=turnboy,
-        # )
-    else:
-        for loader in loaders:
-            if loader == turnboy:
-                # If the loader is the turnboy, update both turnboy and loader pay
-                update_payroll_manager(loader, turnboy_pay, per_loader_pay)
-            else:
-                # If it's a regular loader, only update loader pay
-                update_payroll_manager(loader, 0, per_loader_pay)
-    
-    # Cleanup: Handle deletion of payroll and loader assignments when a delivery is deleted.
-    if isinstance(instance, Delivery) and kwargs.get('signal') == 'post_delete':
-        PayrollManager.objects.filter(delivery=instance).delete()
-        LoaderAssignment.objects.filter(delivery=instance).delete()
+@receiver(post_delete, sender=Delivery)
+def cleanup_on_delivery_delete(sender, instance, **kwargs):
+    # Clean up all loader assignments and payroll records on delivery deletion
+    LoaderAssignment.objects.filter(delivery=instance).delete()
+    PayrollManager.objects.filter(delivery=instance).delete()
+
+
+
+
