@@ -92,22 +92,33 @@ class Vehicle(models.Model):
 # ===================================================
 class Delivery(models.Model):
     """Delivery model to track individual delivery trips"""
-    date = models.DateField()
+
+    STATUS_CHOICES = [
+        ('completed', 'Completed'),
+        ('pending', 'Pending'),
+        ('in_progress', 'In Progress'),
+    ]
+    
+    date = models.DateField(db_index=True)  # Added index for performance
+    delivery_note_image = models.ImageField(upload_to='delivery_notes/', blank=True, null=True)
     time = models.TimeField()
-    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE)
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, db_index=True)
     driver = models.ForeignKey(
         Staff, related_name='driver_deliveries', on_delete=models.CASCADE,
-        limit_choices_to={'role': 'driver'}
+        limit_choices_to={'role': 'driver'}, db_index=True
     )
     turnboy = models.ForeignKey(
         Staff, related_name='turnboy_deliveries', on_delete=models.CASCADE,
-        limit_choices_to={'role': 'turnboy'}
+        limit_choices_to={'role': 'turnboy'}, db_index=True
     )
     turnboy_payment = models.DecimalField(
         max_digits=10, decimal_places=2, default=200.00,
         help_text="Payment for the turnboy for this delivery; can be adjusted based on distance"
     )
-    status = models.BooleanField(default=True, help_text="Check if delivery was completed")    
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='pending',
+        help_text="Status of the delivery"
+    )    
     destination = models.CharField(max_length=100)
     items_carried = models.TextField()
     loading_amount = models.DecimalField(
@@ -121,13 +132,12 @@ class Delivery(models.Model):
         ordering = ['-date']
     
     def __str__(self):
-        return f"Delivery to {self.destination} on {self.date} - {self.vehicle.plate_number}"
+        return f"Delivery to {self.destination} on {self.date} - {self.vehicle.plate_number} (Driver: {self.driver.name}, Turnboy: {self.turnboy.name})"
     
     def get_loaders(self):
         """Return a list of all loaders for this delivery"""
-        # Consider using prefetch_related on loaderassignment_set in views for performance.
+        # Using prefetch_related would be more efficient in views for performance.
         return [assignment.loader for assignment in self.loaderassignment_set.all()]
-    
     
     def per_loader_amount(self):
         """Calculate amount paid to each loader"""
@@ -135,7 +145,7 @@ class Delivery(models.Model):
         if num_loaders > 0:
             return self.loading_amount / Decimal(num_loaders)
         return Decimal('0.00')
-
+    
 # ===================================================
 # LoaderAssignment Model
 # ===================================================
@@ -148,11 +158,10 @@ class LoaderAssignment(models.Model):
     )
     
     class Meta:
-        unique_together = ('delivery', 'loader')
-    
+        unique_together = ('delivery', 'loader')  # Ensures a loader can only be assigned once per delivery
+
     def __str__(self):
         return f"{self.loader.name} - {self.delivery}"
-
 
 # ===================================================
 # MonthlyPayment Model
@@ -193,11 +202,12 @@ class PayrollManager(models.Model):
         unique_together = ('staff', 'delivery')
     # Automatically calculate total pay when saving or updating the record.
     def clean(self):
-      self.total_pay = self.turnboy_pay + self.loader_pay
+        self.total_pay = self.turnboy_pay + self.loader_pay
 
-    # def save(self, *args, **kwargs):
-    #     self.total_pay = self.turnboy_pay + self.loader_pay
-    #     super().save(*args, **kwargs)
+    def save(self, *args, **kwargs):
+        self.full_clean()  # ensures clean() is always called
+        super().save(*args, **kwargs)
+
 
 # # ===================================================
 # # Signal Handler(s)
