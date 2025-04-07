@@ -220,18 +220,43 @@ class PayrollManager(models.Model):
 # # ===================================================
 # # Signal Handler(s)
 # # ===================================================
-# Signal to update or create PayrollManager records when a LoaderAssignment is created or updated.
-# This ensures that the payroll is always in sync with the loader assignments.
+@receiver(post_save, sender=Delivery)
+@receiver(post_delete, sender=Delivery)
+def update_payroll_manager(sender, instance, **kwargs):
+    # If a Delivery is deleted, clean up related PayrollManager and LoaderAssignment records.
+    if kwargs.get('signal') == post_delete:
+        PayrollManager.objects.filter(delivery=instance).delete()
+        LoaderAssignment.objects.filter(delivery=instance).delete()
+        return
+
+    turnboy = instance.turnboy
+    turnboy_pay = instance.turnboy_payment
+    per_loader_pay = instance.per_loader_amount()
+    
+    # Helper function to update or create a payroll record.
+    def update_payroll(staff_local, tb_pay, loader_pay):
+        PayrollManager.objects.update_or_create(
+            staff=staff_local,
+            delivery=instance,
+            defaults={
+                'turnboy_pay': tb_pay,
+                'loader_pay': loader_pay,
+            }
+        )
+
+    if instance.turnboy_loaded:
+        update_payroll(turnboy, turnboy_pay, per_loader_pay)
+    else:
+        update_payroll(turnboy, turnboy_pay, Decimal('0.00'))
+
 @receiver(post_save, sender=LoaderAssignment)
 def update_payroll_on_loader_assignment(sender, instance, **kwargs):
     delivery = instance.delivery
     loader = instance.loader
     per_loader_pay = delivery.per_loader_amount()
-
-    # Check if loader is also turnboy
-    is_turnboy = loader == delivery.turnboy
-    turnboy_pay = delivery.turnboy_payment if is_turnboy else Decimal('0.00')
-
+    is_turnboy = (loader == delivery.turnboy)
+    turnboy_pay = delivery.turnboy_payment if is_turnboy and delivery.turnboy_loaded else Decimal('0.00')
+    
     PayrollManager.objects.update_or_create(
         staff=loader,
         delivery=delivery,
@@ -240,35 +265,12 @@ def update_payroll_on_loader_assignment(sender, instance, **kwargs):
             'loader_pay': per_loader_pay,
         }
     )
-# Signal to delete PayrollManager records when a LoaderAssignment is deleted.
+
 @receiver(post_delete, sender=LoaderAssignment)
-def delete_payroll_on_loader_remove(sender, instance, **kwargs):
-    # Clean up PayrollManager if loader is removed from delivery
+def delete_payroll_on_loader_assignment(sender, instance, **kwargs):
     PayrollManager.objects.filter(
         staff=instance.loader,
         delivery=instance.delivery
     ).delete()
-
-# Signal to assign turnboy as loader if no loaders are assigned to the delivery.
-# This ensures that the turnboy is always included in the loader assignments if they are also a loader.
-
-@receiver(post_save, sender=Delivery)
-def assign_turnboy_as_loader_if_needed(sender, instance, created, **kwargs):
-    loaders = instance.get_loaders()
-
-    # If no loaders and turnboy is also a loader, assign them
-    if not loaders and instance.turnboy.is_loader:
-        LoaderAssignment.objects.get_or_create(
-            delivery=instance,
-            loader=instance.turnboy
-        )
-
-@receiver(post_delete, sender=Delivery)
-def cleanup_on_delivery_delete(sender, instance, **kwargs):
-    # Clean up all loader assignments and payroll records on delivery deletion
-    LoaderAssignment.objects.filter(delivery=instance).delete()
-    PayrollManager.objects.filter(delivery=instance).delete()
-
-
 
 
