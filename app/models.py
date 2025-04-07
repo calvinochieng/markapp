@@ -5,7 +5,6 @@ import calendar
 from decimal import Decimal
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
-from django.db import models
 
 # ===================================================
 # Staff Model
@@ -29,43 +28,34 @@ class Staff(models.Model):
         return f"{self.name} ({self.get_role_display()})"
       
     def get_monthly_payment(self, year, month):
-        """Calculate total payment for this staff member for a specific month"""
-        # Create timezone-aware start and end datetimes for the month.
-        start_date = timezone.localtime(timezone.datetime(year, month, 1))
+        """
+        Calculate total payment for this staff member for a specific month
+        based on completed PayrollManager records
+        """
+        # Create timezone-aware start and end dates for the month
+        start_date = timezone.datetime(year, month, 1).date()
         _, last_day = calendar.monthrange(year, month)
-        end_date = timezone.localtime(timezone.datetime(year, month, last_day, 23, 59, 59))
+        end_date = timezone.datetime(year, month, last_day).date()
 
-        total_payment = Decimal('0.00')
-
-        # Efficient turnboy payment: Aggregate turnboy payments for deliveries in the month.
-        if self.role == 'turnboy':
-            turnboy_payment = Delivery.objects.filter(
-                turnboy=self,
-                date__range=(start_date, end_date)
-            ).aggregate(
-                total_payment=Sum('turnboy_payment')
-            )['total_payment'] or Decimal('0.00')
-            total_payment += turnboy_payment
-
-        # Efficient loader payment: Use annotated loader assignments.
-        if self.is_loader:
-            loader_assignments = (
-                LoaderAssignment.objects
-                .select_related('delivery')
-                .filter(
-                    loader=self,
-                    delivery__date__range=(start_date, end_date)
-                )
-                .annotate(num_loaders=Count('delivery__loaderassignment'))
-            )
-            for assignment in loader_assignments:
-                num_loaders = assignment.num_loaders
-                if num_loaders > 0:
-                    loader_payment = assignment.delivery.loading_amount / Decimal(num_loaders)
-                    total_payment += loader_payment
-
-        return total_payment
-
+        # Use PayrollManager records for more accurate payment calculation
+        payments = PayrollManager.objects.filter(
+            staff=self,
+            delivery__date__range=(start_date, end_date)
+        ).aggregate(
+            total_turnboy=Sum('turnboy_pay'),
+            total_loader=Sum('loader_pay'),
+            total=Sum('total_pay')
+        )
+        
+        turnboy_payment = payments['total_turnboy'] or Decimal('0.00')
+        loader_payment = payments['total_loader'] or Decimal('0.00')
+        total_payment = payments['total'] or Decimal('0.00')
+        
+        return {
+            'turnboy_payment': turnboy_payment,
+            'loader_payment': loader_payment,
+            'total_payment': total_payment
+        }
 # ===================================================
 # Vehicle Model
 # ===================================================
@@ -116,7 +106,7 @@ class Delivery(models.Model):
         help_text="Payment for the turnboy for this delivery; can be adjusted based on distance"
     )
     status = models.CharField(
-        max_length=20, choices=STATUS_CHOICES, default='pending',
+        max_length=20, choices=STATUS_CHOICES, default='completed',
         help_text="Status of the delivery"
     )    
     destination = models.CharField(max_length=100)
@@ -143,16 +133,30 @@ class Delivery(models.Model):
         return [assignment.loader for assignment in self.loaderassignment_set.all()]
 
     def total_loader_count(self):
-        """Include turnboy if they helped with loading"""
+        """
+        Count the total number of people loading, including the turnboy if they helped
+        """
+        # Count regular loaders from LoaderAssignment
         count = self.loaderassignment_set.count()
+        
+        # Add turnboy if they helped with loading
         if self.turnboy_loaded:
             count += 1
+        
         return count
 
     def per_loader_amount(self):
-        """Split loading money across actual loaders + turnboy if they helped"""
-        num = self.total_loader_count()
-        return self.loading_amount / Decimal(num) if num > 0 else Decimal('0.00')
+        """
+        Calculate payment per loader, splitting loading money across all loaders
+        (including turnboy if they helped)
+        """
+        num_loaders = self.total_loader_count()
+        
+        if num_loaders == 0:
+            return Decimal('0.00')
+            
+        # Split loading amount evenly among all loaders
+        return self.loading_amount / Decimal(num_loaders)
 
 # ===================================================
 # LoaderAssignment Model
@@ -193,7 +197,6 @@ class MonthlyPayment(models.Model):
         return f"{self.staff.name} - {month_name} {self.year}"
 
 
-
 # # ===================================================
 # # PayrollManager Model
 # # ===================================================
@@ -208,69 +211,86 @@ class PayrollManager(models.Model):
 
     class Meta:
         unique_together = ('staff', 'delivery')
-    # Automatically calculate total pay when saving or updating the record.
-    def clean(self):
-        self.total_pay = self.turnboy_pay + self.loader_pay
-
+        
     def save(self, *args, **kwargs):
-        self.full_clean()  # ensures clean() is always called
+        # Always calculate total_pay as the sum of turnboy_pay and loader_pay
+        self.total_pay = self.turnboy_pay + self.loader_pay
         super().save(*args, **kwargs)
-
-
+        
+    def __str__(self):
+        return f"{self.staff.name} - {self.delivery} - ₦{self.total_pay}"
 # # ===================================================
 # # Signal Handler(s)
 # # ===================================================
 @receiver(post_save, sender=Delivery)
 @receiver(post_delete, sender=Delivery)
 def update_payroll_manager(sender, instance, **kwargs):
-    # If a Delivery is deleted, clean up related PayrollManager and LoaderAssignment records.
+    """
+    Update payroll records when a delivery is saved or deleted.
+    This handles both turnboy payments and recalculates loader payments.
+    """
+    # If a Delivery is deleted, clean up related records
     if kwargs.get('signal') == post_delete:
         PayrollManager.objects.filter(delivery=instance).delete()
-        LoaderAssignment.objects.filter(delivery=instance).delete()
         return
 
+    # 1. Update turnboy's payroll record
     turnboy = instance.turnboy
     turnboy_pay = instance.turnboy_payment
-    per_loader_pay = instance.per_loader_amount()
     
-    # Helper function to update or create a payroll record.
-    def update_payroll(staff_local, tb_pay, loader_pay):
+    # Calculate per-loader payment amount
+    per_loader_amount = instance.per_loader_amount()
+    
+    # Handle turnboy's loader payment if they helped with loading
+    if instance.turnboy_loaded:
         PayrollManager.objects.update_or_create(
-            staff=staff_local,
+            staff=turnboy,
             delivery=instance,
             defaults={
-                'turnboy_pay': tb_pay,
-                'loader_pay': loader_pay,
+                'turnboy_pay': turnboy_pay,
+                'loader_pay': per_loader_amount,
+                'total_pay': turnboy_pay + per_loader_amount,
+            }
+        )
+    else:
+        # Turnboy didn't help with loading - only gets turnboy payment
+        PayrollManager.objects.update_or_create(
+            staff=turnboy,
+            delivery=instance,
+            defaults={
+                'turnboy_pay': turnboy_pay,
+                'loader_pay': Decimal('0.00'),
+                'total_pay': turnboy_pay,
+            }
+        )
+    
+    # 2. Update all other loaders' payroll records
+    loaders = instance.get_loaders()
+    for loader in loaders:
+        # Skip if this loader is also the turnboy (already handled above)
+        if loader == turnboy:
+            continue
+            
+        PayrollManager.objects.update_or_create(
+            staff=loader,
+            delivery=instance,
+            defaults={
+                'turnboy_pay': Decimal('0.00'),  # Not a turnboy payment
+                'loader_pay': per_loader_amount,
+                'total_pay': per_loader_amount,
             }
         )
 
-    if instance.turnboy_loaded:
-        update_payroll(turnboy, turnboy_pay, per_loader_pay)
-    else:
-        update_payroll(turnboy, turnboy_pay, Decimal('0.00'))
 
 @receiver(post_save, sender=LoaderAssignment)
-def update_payroll_on_loader_assignment(sender, instance, **kwargs):
-    delivery = instance.delivery
-    loader = instance.loader
-    per_loader_pay = delivery.per_loader_amount()
-    is_turnboy = (loader == delivery.turnboy)
-    turnboy_pay = delivery.turnboy_payment if is_turnboy and delivery.turnboy_loaded else Decimal('0.00')
-    
-    PayrollManager.objects.update_or_create(
-        staff=loader,
-        delivery=delivery,
-        defaults={
-            'turnboy_pay': turnboy_pay,
-            'loader_pay': per_loader_pay,
-        }
-    )
-
 @receiver(post_delete, sender=LoaderAssignment)
-def delete_payroll_on_loader_assignment(sender, instance, **kwargs):
-    PayrollManager.objects.filter(
-        staff=instance.loader,
-        delivery=instance.delivery
-    ).delete()
-
-
+def update_payroll_on_loader_assignment_change(sender, instance, **kwargs):
+    """
+    When loader assignments change (add/remove), recalculate all payroll records
+    for this delivery to ensure per_loader amounts are correct.
+    """
+    delivery = instance.delivery
+    
+    # We'll use the delivery signal handler to recalculate everything
+    # This ensures all payroll records are updated when the number of loaders changes
+    update_payroll_manager(Delivery, delivery, raw=False)

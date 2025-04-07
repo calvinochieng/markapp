@@ -1,185 +1,399 @@
 {% extends "base.html" %}
 {% block title %}Delivery Management Dashboard{% endblock title %}
 
+{% block custom_style %}
+<style>
+  :root {
+    --primary-color: rgb(0, 128, 255);
+    --secondary-color: #3498db;
+    --accent-color: #e74c3c;
+    --success-color: #2ecc71;
+    --warning-color: #f39c12;
+    --danger-color: #e74c3c;
+    --info-color: #3498db;
+  }
 
-  {% block custom_style %}
-  <style>
-    :root {
-      --primary-color:rgb(0, 128, 255);
-      --secondary-color: #3498db;
-      --accent-color: #e74c3c;
+  body {
+    font-family: 'Montserrat', sans-serif;
+  }
+
+  .custom-navbar {
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  }
+
+  .navbar-item, .navbar-link {
+    transition: all 0.3s ease;
+  }
+
+  .navbar-item:hover, .navbar-link:hover {
+    background-color: hsla(0, 0.00%, 100.00%, 0.10) !important;
+  }
+
+  .dashboard-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .dashboard-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    border: 1px #2a2a2e solid;
+  }
+
+  .stat-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+  }
+
+  .stat-medium {
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: var(--primary-color);
+  }
+
+  .recent-deliveries, .data-table-container {
+    max-height: 400px;
+    overflow-y: auto;
+    box-shadow: 0 0 0 rgba(0,0,0,0.1);
+  }
+
+  .section {
+    padding: 3rem 1.5rem;
+  }
+
+  .footer {
+    background-color: var(--primary-color);
+    color: #fff;
+    padding: 2rem 1.5rem;
+  }
+
+  .filter-container {
+    {% comment %} background-color: #f8f9fa;  {% endcomment %}
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .progress {
+    height: 10px;
+    margin-top: 8px;
+  }
+
+  .chart-container {
+    height: 250px;
+    width: 100%;
+  }
+
+  .status-tag.completed {
+    background-color: var(--success-color);
+    color: white;
+  }
+  
+  .status-tag.in_progress {
+    background-color: var(--info-color);
+    color: white;
+  }
+  
+  .status-tag.pending {
+    background-color: var(--warning-color);
+    color: white;
+  }
+
+  .card-equal-height {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .card-equal-height .card-content {
+    flex-grow: 1;
+  }
+
+  @media screen and (max-width: 768px) {
+    .hero {
+      padding: 2rem 1rem;
     }
-
-    body {
-      font-family: 'Montserrat', sans-serif;
-      {% comment %} background-color: #f8f9fa; {% endcomment %}
-    }
-
-    .custom-navbar {
-      {% comment %} background-color: var(--primary-color); {% endcomment %}
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    }
-
-    .navbar-item, .navbar-link {
-      {% comment %} color: #fff !important; {% endcomment %}
-      transition: all 0.3s ease;
-    }
-
-    .navbar-item:hover, .navbar-link:hover {
-      background-color: hsla(0, 0.00%, 100.00%, 0.10) !important;
-    }
-
-    .dashboard-card {
-      transition: transform 0.3s ease, box-shadow 0.3s ease;
-      border-radius: 12px;
-      overflow: hidden;
-    }
-
-    .dashboard-card:hover {
-      transform: translateY(-5px);
-      box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-      border:1px #2a2a2e solid;
-    }
-
+    
     .stat-number {
-      font-size: 2.5rem;
-      font-weight: 700;
-      color: var(--primary-color);
+      font-size: 1.8rem;
     }
-
-    .recent-deliveries {
-      max-height: 400px;
-      overflow-y: auto;
-      box-shadow: 0 0 0 rgba(0,0,0,0.1);
+    
+    .stat-medium {
+      font-size: 1.4rem;
     }
+  }
+  
+  footer {
+    display: none;
+  }
+</style>
+{% endblock custom_style %}
 
-    .section {
-      padding: 3rem 1.5rem;
-    }
-
-    .footer {
-      background-color: var(--primary-color);
-      color: #fff;
-      padding: 2rem 1.5rem;
-    }
-
-    @media screen and (max-width: 768px) {
-      .hero {
-        padding: 2rem 1rem;
-      }
+{% block content %}
+  <section class="hero is-medium">
+    <div class="hero-body">
+      <h1 class="title is-1 has-text-centered mb-5">Delivery Management Dashboard</h1>
       
-      .stat-number {
-        font-size: 1.8rem;
-      }
-    }
-    footer{display: none;}
-  </style>
-  {% endblock custom_style %}
-  {% block content %}
-    <section class="hero is-medium">
-        <div class="hero-body">
-            <h1 class="title is-1 has-text-centered mb-6">Delivery Management Dashboard</h1>
-            
-            <!-- Stats Overview -->
-            <div class="columns is-multiline mb-6">
-                <div class="column is-3">
-                    <div class="dashboard-card box ">
-                        <p class="has-text-grey">Total Deliveries</p>
-                        <p class="stat-number" id="total-deliveries">
-                        {{total_deliveries}}
-                        </p>
-                        <p class="has-text-success"><i class="fas fa-arrow-up"></i> 12% from last month</p>
-                        <button class="button  mt-4 is-primary is-rounded has-text-weight-bold py-4" 
-                                onclick="window.location.href='/admin/app/delivery/add/'">
-                            <i class="fas fa-plus-circle mr-2"></i>New Delivery
-                        </button>
-                    </div>
-                </div>
-                <div class="column is-3">
-                    <div class="dashboard-card box ">
-                        <p class="has-text-grey">Active Staff</p>
-                        <p class="stat-number" id="active-staff">
-                        {{active_staff}}
-                        </p>
-                        <p class="has-text-info">{{loaders_available}} Loaders Available</p>
-                        <button class="button  mt-4 is-info is-rounded has-text-weight-bold py-4"
-                                onclick="window.location.href='/admin/app/staff/add/'">
-                            <i class="fas fa-user-plus mr-2"></i> Add Loader
-                        </button>
-                    </div>
-                </div>
-                <div class="column is-3">
-                    <div class="dashboard-card box ">
-                        <p class="has-text-grey">Loading/ Turnboy Expenses</p>
-                        <p class="stat-number">Ksh <span id="total-salary">{{total_deliveries_amount}}/=</span></p>
-                        <p class="has-text-warning">
-                            <span class="has-text-grey">Loading</span> : {{total_loading_amount}}/= 
-                            <span class="has-text-grey">Turnboy:</span> {{total_turnboy_payments}}/= 
-                        </p>
-                        <button class="button is-success mt-4 is-rounded has-text-weight-bold py-4"
-                                onclick="window.location.href='/admin/app/monthlypayment/'">
-                            <i class="fas fa-file-invoice-dollar mr-2"></i>Generate Payroll
-                        </button>
-                    </div>
-                </div>
-                <div class="column is-3">
-                    <div class="dashboard-card box ">
-                        <p class="has-text-grey">Active Vehicles</p>
-                        <p class="stat-number" id="active-vehicles">{{active_vehicles}}</p>
-                        <p class="has-text-danger">0 Under Maintenance</p>
-                        <button class="button is-success mt-4 is-rounded has-text-weight-bold py-4"
-                                onclick="window.location.href='/admin/app/monthlypayment/'">
-                            <i class="fas fa-truck mr-2"></i>Add Vehicle
-                        </button>
-                    </div>
-                </div>
-            </div>
-            <!-- Recent Deliveries Section -->   
-            <div class="mt-6">
-                <h2 class="title is-4 mb-4">Recent Deliveries</h2>
-                <div class="box recent-deliveries px-0">
-                <table class="table is-fullwidth is-hoverable">
-                    <thead>
-                        <tr class="px-4">
-                            <th>Date</th>
-                            <th>Vehicle</th>
-                            <th>Driver</th>
-                            <th>Location</th>
-                            <th>Items Carried</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    <!-- Dynamic content would go here -->
-                    {% for delivery in deliveries %}
-                        <tr>
-                            <td>{{delivery.date}}</td>
-                            <td>{{delivery.vehicle}}</td>
-                            <td>{{delivery.driver.name}}</td>
-                            <td>{{delivery.destination}}</td>
-                            <td>{{delivery.items_carried}}</td>
-                            <td>
-                                {% if delivery.status %}
-                                <span class="tag is-success">
-                                        Completed
-                                    {% else %}
-                                <span class="tag is-warning">
-                                        Pending
-                                    {% endif %}
-                                </span>
-                            </td>
-                            <td>
-                            <button class="button is-small is-info">View</button>
-                            <button class="button is-small is-warning">Edit</button>
-                            </td>
-                        </tr>
+      <!-- Date Filter -->
+      <div class="filter-container box mb-5">
+        <h3 class="title is-5 mb-3">Data for: {{ selected_month_name }} {{ selected_year }} ({{ date_range }})</h3>
+        <form method="get" class="columns is-vcentered">
+          <div class="column is-3">
+            <div class="field">
+              <label class="label">Year</label>
+              <div class="control">
+                <div class="select is-fullwidth">
+                  <select name="year" id="year-select">
+                    {% for year in years %}
+                      <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
                     {% endfor %}
-                    </tbody>
-                </table>
+                  </select>
+                </div>
+              </div>
             </div>
-        </div> 
-    </section>
+          </div>
+          <div class="column is-3">
+            <div class="field">
+              <label class="label">Month</label>
+              <div class="control">
+                <div class="select is-fullwidth">
+                  <select name="month" id="month-select">
+                    {% for month_num, month_name in months %}
+                      <option value="{{ month_num }}" {% if month_num == selected_month %}selected{% endif %}>{{ month_name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="column is-2">
+            <div class="field">
+              <label class="label">&nbsp;</label>
+              <div class="control">
+                <button type="submit" class="button is-primary is-fullwidth">Apply Filter</button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+      
+      <!-- Stats Overview -->
+      <div class="columns is-multiline mb-5">
+        <div class="column is-3">
+          <div class="dashboard-card box">
+            <p class="has-text-grey">Total Deliveries</p>
+            <p class="stat-number" id="total-deliveries">
+              {{ total_deliveries }}
+            </p>
+            <div class="columns is-mobile mt-2">
+              <div class="column">
+                <span class="tag is-light is-success is-medium">{{ completed_deliveries }} Completed</span>
+              </div>
+              <div class="column">
+                <span class="tag is-light is-warning is-medium">{{ pending_deliveries }} Pending</span>
+              </div>
+            </div>
+            <button class="button mt-4 is-primary is-rounded has-text-weight-bold py-4" 
+                    onclick="window.location.href='/admin/app/delivery/add/'">
+              <i class="fas fa-plus-circle mr-2"></i>New Delivery
+            </button>
+          </div>
+        </div>
+        <div class="column is-3">
+          <div class="dashboard-card box">
+            <p class="has-text-grey">Active Staff</p>
+            <p class="stat-number" id="active-staff">
+              {{ active_staff }}
+            </p>
+            <div class="columns is-mobile mt-2">
+              <div class="column">
+                <span class="tag is-light is-info is-medium">{{ active_drivers }} Drivers</span>
+              </div>
+              <div class="column">
+                <span class="tag is-light is-success is-medium">{{ active_turnboys }} Turnboys</span>
+              </div>
+              <div class="column">
+                <span class="tag is-light is-warning is-medium">{{ loaders_available }} Loaders</span>
+              </div>
+            </div>
+            <button class="button mt-4 is-info is-rounded has-text-weight-bold py-4"
+                    onclick="window.location.href='/admin/app/staff/add/'">
+              <i class="fas fa-user-plus mr-2"></i> Add Staff
+            </button>
+          </div>
+        </div>
+        <div class="column is-3">
+          <div class="dashboard-card box">
+            <p class="has-text-grey">Payment Summary</p>
+            <p class="stat-number">Ksh <span id="total-salary">{{ total_pay|floatformat:2 }}/=</span></p>
+            <div class="columns is-mobile is-multiline mt-2">
+              <div class="column is-12">
+                <p class="has-text-grey">Loading: Ksh {{ total_loading_amount|floatformat:2 }}/=</p>
+              </div>
+              <div class="column is-12">
+                <p class="has-text-grey">Turnboy: Ksh {{ total_turnboy_payments|floatformat:2 }}/=</p>
+              </div>
+            </div>
+            <button class="button is-success mt-4 is-rounded has-text-weight-bold py-4"
+                    onclick="window.location.href='/admin/app/monthlypayment/'">
+              <i class="fas fa-file-invoice-dollar mr-2"></i>Generate Payroll
+            </button>
+          </div>
+        </div>
+        <div class="column is-3">
+          <div class="dashboard-card box">
+            <p class="has-text-grey">Active Vehicles</p>
+            <p class="stat-number" id="active-vehicles">{{ active_vehicles }}</p>
+            <div class="columns is-mobile mt-2">
+              <div class="column">
+                <span class="tag is-light is-primary is-medium">{{ active_trucks }} Trucks</span>
+              </div>
+              <div class="column">
+                <span class="tag is-light is-info is-medium">{{ active_vans }} Vans</span>
+              </div>
+              <div class="column">
+                <span class="tag is-light is-success is-medium">{{ active_buses }} Buses</span>
+              </div>
+            </div>
+            <button class="button is-success mt-4 is-rounded has-text-weight-bold py-4"
+                    onclick="window.location.href='/admin/app/vehicle/add/'">
+              <i class="fas fa-truck mr-2"></i>Add Vehicle
+            </button>
+          </div>
+        </div>
+      </div>
 
+      <!-- Middle Section: Top Performers & Destinations -->
+      <div class="columns mb-5">
+        <!-- Top Destinations -->
+        <div class="column is-6">
+          <div class="box">
+            <h3 class="title is-4 mb-3">Top Destinations</h3>
+            <table class="table is-fullwidth is-hoverable">
+              <thead>
+                <tr>
+                  <th>Destination</th>
+                  <th>Deliveries</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for destination in top_destinations %}
+                <tr>
+                  <td>{{ destination.destination }}</td>
+                  <td>{{ destination.count }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="2" class="has-text-centered">No destination data available</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        
+        <!-- Top Drivers -->
+        <div class="column is-6">
+          <div class="box">
+            <h3 class="title is-4 mb-3">Top Drivers</h3>
+            <table class="table is-fullwidth is-hoverable">
+              <thead>
+                <tr>
+                  <th>Driver</th>
+                  <th>Deliveries</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for driver in top_drivers %}
+                <tr>
+                  <td>{{ driver.name }}</td>
+                  <td>{{ driver.delivery_count }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="2" class="has-text-centered">No driver data available</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Recent Deliveries Section -->   
+      <div class="mt-5">
+        <h2 class="title is-4 mb-4">Recent Deliveries</h2>
+        <div class="box recent-deliveries px-0">
+          <table class="table is-fullwidth is-hoverable">
+            <thead>
+              <tr class="px-4">
+                <th>Date</th>
+                <th>Vehicle</th>
+                <th>Driver</th>
+                <th>Turnboy</th>
+                <th>Location</th>
+                <th>Loading Amt</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for delivery in deliveries %}
+                <tr>
+                  <td>{{ delivery.date }}</td>
+                  <td>{{ delivery.vehicle.plate_number }}</td>
+                  <td>{{ delivery.driver.name }}</td>
+                  <td>{{ delivery.turnboy.name }}</td>
+                  <td>{{ delivery.destination }}</td>
+                  <td>Ksh {{ delivery.loading_amount|floatformat:2 }}/=</td>
+                  <td>
+                    {% if delivery.status == 'completed' %}
+                      <span class="tag status-tag completed">Completed</span>
+                    {% elif delivery.status == 'in_progress' %}
+                      <span class="tag status-tag in_progress">In Progress</span>
+                    {% else %}
+                      <span class="tag status-tag pending">Pending</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <div class="buttons are-small">
+                      <a href="{% url 'admin:app_delivery_change' delivery.id %}" class="button is-info">
+                        <span class="icon"><i class="fas fa-eye"></i></span>
+                      </a>
+                      <a href="{% url 'admin:app_delivery_change' delivery.id %}" class="button is-warning">
+                        <span class="icon"><i class="fas fa-edit"></i></span>
+                      </a>
+                    </div>
+                  </td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="8" class="has-text-centered">No deliveries found for this period</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Add JavaScript to make filtering interactive -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      // Make the year and month selection auto-submit the form
+      const yearSelect = document.getElementById('year-select');
+      const monthSelect = document.getElementById('month-select');
+      
+      yearSelect.addEventListener('change', function() {
+        this.form.submit();
+      });
+      
+      monthSelect.addEventListener('change', function() {
+        this.form.submit();
+      });
+    });
+  </script>
 {% endblock content %}
-

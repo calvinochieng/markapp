@@ -1,0 +1,443 @@
+{% extends "base.html" %}
+{% block title %}Staff Payroll Management{% endblock title %}
+
+{% block custom_style %}
+<style>
+  :root {
+    --primary-color: rgb(0, 128, 255);
+    --secondary-color: #3498db;
+    --accent-color: #e74c3c;
+    --success-color: #2ecc71;
+    --warning-color: #f39c12;
+    --danger-color: #e74c3c;
+    --info-color: #3498db;
+  }
+  
+  body {
+    font-family: 'Montserrat', sans-serif;
+  }
+  
+  .dashboard-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  
+  .dashboard-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    border: 1px #2a2a2e solid;
+  }
+  
+  .stat-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+  }
+  
+  .data-table-container {
+    overflow-x: auto;
+  }
+  
+  .filter-container {
+    {% comment %} background-color: #f8f9fa; {% endcomment %}
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 2rem;
+  }
+  
+  .tag.is-paid {
+    background-color: var(--success-color);
+    color: white;
+  }
+  
+  .tag.not-paid {
+    background-color: var(--warning-color);
+    color: white;
+  }
+  
+  .sticky-header {
+    position: sticky;
+    top: 0;
+    background-color: white;
+    z-index: 10;
+  }
+  
+  .delivery-details {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+  }
+  
+  .delivery-details.expanded {
+    max-height: 1000px;
+  }
+  
+  .staff-row:hover {
+    background-color: #f9f9f9;
+    cursor: pointer;
+  }
+  
+  .staff-row.selected {
+    background-color: #eaf5fd;
+  }
+  
+  .staff-details-card {
+    border-left: 4px solid var(--primary-color);
+  }
+  
+  @media screen and (max-width: 768px) {
+    .hero {
+      padding: 2rem 1rem;
+    }
+    
+    .stat-number {
+      font-size: 1.8rem;
+    }
+  }
+</style>
+{% endblock custom_style %}
+
+{% block content %}
+<section class="hero">
+  <div class="hero-body">
+    <h1 class="title is-2 has-text-centered mb-5">Staff Payroll Management</h1>
+    
+    <!-- Filter Section -->
+    <div class="filter-container box mb-5">
+      <h3 class="title is-5 mb-3">Payroll for: {{ selected_month_name }} {{ selected_year }} ({{ date_range }})</h3>
+      <form method="get" id="filter-form" class="columns is-multiline is-vcentered">
+        <div class="column is-2">
+          <div class="field">
+            <label class="label">Year</label>
+            <div class="control">
+              <div class="select is-fullwidth">
+                <select name="year" id="year-select">
+                  {% for year in years %}
+                    <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="column is-2">
+          <div class="field">
+            <label class="label">Month</label>
+            <div class="control">
+              <div class="select is-fullwidth">
+                <select name="month" id="month-select">
+                  {% for month_num, month_name in months %}
+                    <option value="{{ month_num }}" {% if month_num == selected_month %}selected{% endif %}>{{ month_name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="column is-2">
+          <div class="field">
+            <label class="label">Role</label>
+            <div class="control">
+              <div class="select is-fullwidth">
+                <select name="role" id="role-select">
+                  <option value="" {% if not role_filter %}selected{% endif %}>All Staff</option>
+                  <option value="driver" {% if role_filter == 'driver' %}selected{% endif %}>Drivers</option>
+                  <option value="turnboy" {% if role_filter == 'turnboy' %}selected{% endif %}>Turnboys</option>
+                  <option value="loader" {% if role_filter == 'loader' %}selected{% endif %}>Loaders</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="column is-2">
+          <div class="field">
+            <label class="label">Staff Member</label>
+            <div class="control">
+              <div class="select is-fullwidth">
+                <select name="staff_id" id="staff-select">
+                  <option value="">All Staff</option>
+                  {% for data in payroll_data %}
+                    <option value="{{ data.staff.id }}" {% if selected_staff and selected_staff.id == data.staff.id %}selected{% endif %}>
+                      {{ data.staff.name }} ({{ data.staff.get_role_display }})
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="column is-2">
+          <div class="field">
+            <label class="label">&nbsp;</label>
+            <div class="control">
+              <button type="submit" class="button is-primary is-fullwidth">Apply Filter</button>
+            </div>
+          </div>
+        </div>
+        <div class="column is-2">
+          <div class="field">
+            <label class="label">&nbsp;</label>
+            <div class="control">
+              <a href="{{ request.path }}?{{ request.GET.urlencode }}&export=csv" class="button is-info is-fullwidth">
+                <span class="icon"><i class="fas fa-file-csv"></i></span>
+                <span>Export CSV</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+    
+    <!-- Stats Cards -->
+    <div class="columns is-multiline mb-5">
+      <div class="column is-3">
+        <div class="dashboard-card box">
+          <p class="has-text-grey">Total Staff</p>
+          <p class="stat-number">{{ total_staff }}</p>
+          <p class="has-text-info">{{ selected_month_name }} {{ selected_year }}</p>
+        </div>
+      </div>
+      <div class="column is-3">
+        <div class="dashboard-card box">
+          <p class="has-text-grey">Total Payroll</p>
+          <p class="stat-number">Ksh {{ total_payroll|floatformat:2 }}</p>
+          <p class="has-text-success">{{ selected_month_name }} {{ selected_year }}</p>
+        </div>
+      </div>
+      <div class="column is-3">
+        <div class="dashboard-card box">
+          <p class="has-text-grey">Turnboy Payments</p>
+          <p class="stat-number">Ksh {{ total_turnboy_pay|floatformat:2 }}</p>
+          <p class="has-text-warning">{{ selected_month_name }} {{ selected_year }}</p>
+        </div>
+      </div>
+      <div class="column is-3">
+        <div class="dashboard-card box">
+          <p class="has-text-grey">Loader Payments</p>
+          <p class="stat-number">Ksh {{ total_loader_pay|floatformat:2 }}</p>
+          <p class="has-text-danger">{{ selected_month_name }} {{ selected_year }}</p>
+        </div>
+      </div>
+    </div>
+    
+    {% if selected_staff %}
+    <!-- Staff Details Card (if specific staff selected) -->
+    <div class="box staff-details-card mb-5">
+      <div class="columns">
+        <div class="column is-4">
+          <h3 class="title is-4">{{ selected_staff.name }}</h3>
+          <p><strong>Role:</strong> {{ selected_staff.get_role_display }}</p>
+          <p><strong>Phone:</strong> {{ selected_staff.phone_number|default:'N/A' }}</p>
+          <p><strong>Joined:</strong> {{ selected_staff.date_joined }}</p>
+          {% if selected_staff.is_loader %}
+            <p><span class="tag is-info">Also works as loader</span></p>
+          {% endif %}
+        </div>
+        <div class="column is-8">
+          <div class="columns is-multiline">
+            <div class="column is-6">
+              <div class="notification is-primary">
+                <p class="heading">Total Payment</p>
+                <p class="title">Ksh {{ payroll_data.0.grand_total|floatformat:2 }}</p>
+              </div>
+            </div>
+            <div class="column is-6">
+              <div class="notification is-info">
+                <p class="heading">Payment Status</p>
+                <p class="title">
+                  {% if payroll_data.0.is_paid %}
+                    <span class="tag is-success is-medium">Paid on {{ payroll_data.0.payment_date }}</span>
+                  {% else %}
+                    <span class="tag is-warning is-medium">Not Paid</span>
+                  {% endif %}
+                </p>
+              </div>
+            </div>
+            <div class="column is-6">
+              <div class="notification is-success">
+                <p class="heading">Turnboy Payment</p>
+                <p class="title">Ksh {{ payroll_data.0.turnboy_total|floatformat:2 }}</p>
+              </div>
+            </div>
+            <div class="column is-6">
+              <div class="notification is-warning">
+                <p class="heading">Loader Payment</p>
+                <p class="title">Ksh {{ payroll_data.0.loader_total|floatformat:2 }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Staff Deliveries Table -->
+    <div class="box mb-5">
+      <h3 class="title is-4 mb-3">Delivery Details</h3>
+      <div class="data-table-container">
+        <table class="table is-fullwidth is-hoverable">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Vehicle</th>
+              <th>Destination</th>
+              <th>Turnboy Pay</th>
+              <th>Loader Pay</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for record in payroll_data.0.deliveries %}
+            <tr>
+              <td>{{ record.delivery.date }}</td>
+              <td>{{ record.delivery.vehicle.plate_number }}</td>
+              <td>{{ record.delivery.destination }}</td>
+              <td>Ksh {{ record.turnboy_pay|floatformat:2 }}</td>
+              <td>Ksh {{ record.loader_pay|floatformat:2 }}</td>
+              <td><strong>Ksh {{ record.total_pay|floatformat:2 }}</strong></td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="6" class="has-text-centered">No delivery records found for this staff member</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+    
+    <!-- Staff Payroll Table -->
+    <form method="post" id="payroll-form">
+      {% csrf_token %}
+      <div class="box">
+        <div class="level">
+          <div class="level-left">
+            <div class="level-item">
+              <h3 class="title is-4">Staff Payroll</h3>
+            </div>
+          </div>
+          <div class="level-right">
+            <div class="level-item">
+              <button type="submit" name="mark_paid" class="button is-success">
+                <span class="icon"><i class="fas fa-check-circle"></i></span>
+                <span>Mark Selected as Paid</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <div class="data-table-container">
+          <table class="table is-fullwidth is-hoverable">
+            <thead class="sticky-header">
+              <tr>
+                <th><input type="checkbox" id="select-all"></th>
+                <th>Staff Name</th>
+                <th>Role</th>
+                <th>Deliveries</th>
+                <th>Turnboy Pay</th>
+                <th>Loader Pay</th>
+                <th>Total Pay</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for data in payroll_data %}
+              <tr class="staff-row {% if selected_staff and selected_staff.id == data.staff.id %}selected{% endif %}" data-staff-id="{{ data.staff.id }}">
+                <td>
+                  <input type="checkbox" name="staff_id" value="{{ data.staff.id }}" class="staff-checkbox"
+                         {% if data.is_paid %}disabled{% endif %}>
+                </td>
+                <td>{{ data.staff.name }}</td>
+                <td>{{ data.staff.get_role_display }}</td>
+                <td>
+                  {% if data.staff.role == 'driver' or data.staff.role == 'turnboy' %}
+                    {{ data.delivery_count }} deliveries
+                  {% endif %}
+                  {% if data.staff.is_loader %}
+                    {% if data.staff.role == 'driver' or data.staff.role == 'turnboy' %}+ {% endif %}
+                    {{ data.loader_count }} loading jobs
+                  {% endif %}
+                </td>
+                <td>Ksh {{ data.turnboy_total|floatformat:2 }}</td>
+                <td>Ksh {{ data.loader_total|floatformat:2 }}</td>
+                <td><strong>Ksh {{ data.grand_total|floatformat:2 }}</strong></td>
+                <td>
+                  {% if data.is_paid %}
+                    <span class="tag is-paid">Paid on {{ data.payment_date }}</span>
+                  {% else %}
+                    <span class="tag not-paid">Not Paid</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <a href="?year={{ selected_year }}&month={{ selected_month }}&staff_id={{ data.staff.id }}" 
+                     class="button is-small is-info">
+                    <span class="icon"><i class="fas fa-eye"></i></span>
+                  </a>
+                </td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="9" class="has-text-centered">No payroll data available for this period</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+            <tfoot>
+              <tr class="is-selected">
+                <td colspan="4"><strong>Totals</strong></td>
+                <td><strong>Ksh {{ total_turnboy_pay|floatformat:2 }}</strong></td>
+                <td><strong>Ksh {{ total_loader_pay|floatformat:2 }}</strong></td>
+                <td><strong>Ksh {{ total_payroll|floatformat:2 }}</strong></td>
+                <td colspan="2"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </form>
+  </div>
+</section>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // Automatically submit form when filters change
+    document.getElementById('year-select').addEventListener('change', function() {
+      document.getElementById('filter-form').submit();
+    });
+    
+    document.getElementById('month-select').addEventListener('change', function() {
+      document.getElementById('filter-form').submit();
+    });
+    
+    document.getElementById('role-select').addEventListener('change', function() {
+      document.getElementById('filter-form').submit();
+    });
+    
+    document.getElementById('staff-select').addEventListener('change', function() {
+      document.getElementById('filter-form').submit();
+    });
+    
+    // Select all checkbox functionality
+    const selectAllCheckbox = document.getElementById('select-all');
+    const staffCheckboxes = document.querySelectorAll('.staff-checkbox:not([disabled])');
+    
+    selectAllCheckbox.addEventListener('change', function() {
+      staffCheckboxes.forEach(checkbox => {
+        checkbox.checked = selectAllCheckbox.checked;
+      });
+    });
+    
+    // Staff row click to navigate to staff details
+    document.querySelectorAll('.staff-row').forEach(row => {
+      row.addEventListener('click', function(e) {
+        // Don't navigate if clicking on a checkbox
+        if (e.target.type !== 'checkbox') {
+          const staffId = this.getAttribute('data-staff-id');
+          window.location.href = `?year=${document.getElementById('year-select').value}&month=${document.getElementById('month-select').value}&staff_id=${staffId}`;
+        }
+      });
+    });
+  });
+</script>
+{% endblock content %}
