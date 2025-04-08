@@ -348,27 +348,82 @@ def update_payroll(sender, instance, **kwargs):
     turnboy_pay = instance.turnboy_payment
     loaders = instance.get_loaders()
     loader_count = len(loaders)
-    per_loader_pay = instance.per_loader_amount()    
+    per_loader_pay = instance.per_loader_amount() 
+    # This to help not repeat the code in the loop below. 
+    def update_payroll_manager(staff,turnboy_pay, per_loader_pay):
+        PayrollManager.objects.update_or_create(
+                    staff=staff,
+                    delivery=instance,
+                    defaults={
+                        'turnboy_pay': turnboy_pay,
+                        'loader_pay': per_loader_pay,
+                    }
+                )  
     if loader_count == 0:
-        # makes sure that turnboy is assigned as the loader as well. and paid the loading money
+        # makes sure that turnboy is paid the loading money and is assigned as the loader as well.
+        update_payroll_manager(turnboy, turnboy_pay, per_loader_pay)
         LoaderAssignment.objects.update_or_create(
             delivery=instance,
             loader=turnboy,
         )
-        PayrollManager.objects.get_or_create(
-            staff=loader,
-            delivery=delivery,
-            defaults={
-                'turnboy_pay': turnboy_payment,  # will be updated separately if loader is also a turnboy.
-                'loader_pay': per_loader_pay,
-                'total_pay': per_loader_pay,
-            }
-        )
+    else:
+        for loader in loaders:
+            if loader is turnboy:
+                # If the loader is also the turnboy, update their payroll record.
+                update_payroll_manager(loader, turnboy_pay, per_loader_pay)
+            else: update_payroll_manager(loader, 0, per_loader_pay)
+            
+
+
 
     '''
     Update or create payroll record for the turnboy, loaders
 
     '''
+
+# ///////
+
+@receiver(post_save, sender=Delivery)
+@receiver(post_delete, sender=Delivery)
+def update_payroll_manager(sender, instance, **kwargs):    
+    turnboy = instance.turnboy
+    turnboy_pay = instance.turnboy_payment
+    loaders = instance.get_loaders()
+    loader_count = len(loaders)
+    per_loader_pay = instance.per_loader_amount() 
+
+    def update_payroll_manager(staff, turnboy_pay, per_loader_pay):
+        """Helper to update or create payroll records."""
+        PayrollManager.objects.update_or_create(
+            staff=staff,
+            delivery=instance,
+            defaults={
+                'turnboy_pay': turnboy_pay,
+                'loader_pay': per_loader_pay,
+            }
+        )  
+
+    # Case when no loaders exist
+    if loader_count == 0:
+        # Ensuring the turnboy is also assigned as a loader
+        update_payroll_manager(turnboy, turnboy_pay, per_loader_pay)
+        # Only create the loader assignment if it doesn't exist
+        LoaderAssignment.objects.update_or_create(
+            delivery=instance,
+            loader=turnboy,
+        )
+    
+    else:
+        for loader in loaders:
+            if loader == turnboy:
+                # If the loader is the turnboy, we update with both turnboy and loader pay
+                update_payroll_manager(loader, turnboy_pay, per_loader_pay)
+            else:
+                # If it's a regular loader, we only update loader pay
+                update_payroll_manager(loader, 0, per_loader_pay)
+
+
+# /////
 
 @receiver(post_save, sender=LoaderAssignment)
 @receiver(post_delete, sender=LoaderAssignment)

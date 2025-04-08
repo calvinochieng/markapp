@@ -186,6 +186,7 @@ def dashboard(request):
 
 
 # /////Payroll View//////
+
 @login_required
 def staff_payroll(request):
     """
@@ -207,8 +208,8 @@ def staff_payroll(request):
     end_date = timezone.datetime(selected_year, selected_month, last_day).date()
     date_range = (start_date, end_date)
     
-    # Get all active staff members
-    staff_query = Staff.objects.filter(is_active=True)
+    # Get all active staff members, excluding drivers
+    staff_query = Staff.objects.filter(is_active=True).exclude(role='driver')
     
     # Apply role filter if provided
     if role_filter:
@@ -242,12 +243,7 @@ def staff_payroll(request):
         
         # Get delivery count for this staff member
         delivery_count = 0
-        if staff.role == 'driver':
-            delivery_count = Delivery.objects.filter(
-                driver=staff,
-                date__range=date_range
-            ).count()
-        elif staff.role == 'turnboy':
+        if staff.role == 'turnboy':
             delivery_count = Delivery.objects.filter(
                 turnboy=staff,
                 date__range=date_range
@@ -352,5 +348,6 @@ def staff_payroll(request):
     }
     
     return render(request, 'payroll/staff_payroll.html', context)
+
 # //////End of Payroll View//////
 

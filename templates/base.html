@@ -1,9 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    {% load static %}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Internal Delivery Management System{% endblock title %}</title>
+  
+  <link rel="icon" href="{% static 'icon.png' %}" type="image/x-icon">
   
   <!-- Dependencies -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@1.0.2/css/bulma.min.css">
@@ -56,6 +59,7 @@
               {% comment %} <span class="has-text-weight-bold">
                 <i class="fas fa-truck-moving mr-2"></i>DELIVERY PRO
               </span> {% endcomment %}
+                {% comment %} <img src="{% static 'logo.png' %}" alt="Logo"> {% endcomment %}
                 <span class="has-text-weight-bold is-size-5 has-text-link">
                     <i class="fas fa-truck-loading mr-2"></i><span class="is-hidden-mobile"> DELIVERY MANAGER</span>
                 </span>
@@ -168,8 +172,8 @@
     <footer class="footer">
         <div class="content has-text-centered">
         <p>
-            <strong class="has-text-white-ter">Internal Delivery Management System</strong><br>
-            © 2025 Mark Logistics. For authorized use only.
+            <strong class="has-text-grey">Internal Delivery Management System. For authorized use only</strong><br>
+            <span class="has-text-grey-dark	">© 2025 Emirk Logistics.</span>
         </p>
         </div>
     </footer>

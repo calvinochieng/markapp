@@ -142,7 +142,6 @@
               <div class="select is-fullwidth">
                 <select name="role" id="role-select">
                   <option value="" {% if not role_filter %}selected{% endif %}>All Staff</option>
-                  <option value="driver" {% if role_filter == 'driver' %}selected{% endif %}>Drivers</option>
                   <option value="turnboy" {% if role_filter == 'turnboy' %}selected{% endif %}>Turnboys</option>
                   <option value="loader" {% if role_filter == 'loader' %}selected{% endif %}>Loaders</option>
                 </select>
@@ -352,11 +351,11 @@
                 <td>{{ data.staff.name }}</td>
                 <td>{{ data.staff.get_role_display }}</td>
                 <td>
-                  {% if data.staff.role == 'driver' or data.staff.role == 'turnboy' %}
+                  {% if data.staff.role == 'turnboy' %}
                     {{ data.delivery_count }} deliveries
                   {% endif %}
                   {% if data.staff.is_loader %}
-                    {% if data.staff.role == 'driver' or data.staff.role == 'turnboy' %}+ {% endif %}
+                    {% if data.staff.role == 'turnboy' %}+ {% endif %}
                     {{ data.loader_count }} loading jobs
                   {% endif %}
                 </td>

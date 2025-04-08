@@ -2,6 +2,8 @@ from django.db import models
 from django.db.models import Sum, Count, Q
 from django.utils import timezone
 import calendar
+# Import User
+from django.contrib.auth.models import User
 from decimal import Decimal
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
@@ -10,6 +12,7 @@ from django.dispatch import receiver
 # Staff Model
 # ===================================================
 class Staff(models.Model):
+    admin = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     """Staff model to represent drivers, turnboys, and loaders"""
     ROLE_CHOICES = [
         ('driver', 'Driver'),
@@ -60,6 +63,7 @@ class Staff(models.Model):
 # Vehicle Model
 # ===================================================
 class Vehicle(models.Model):
+    admin = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     """Vehicle model to represent lorries used for deliveries"""    
     VEHICLE_TYPE_CHOICES = [
         ('truck', 'Truck'),
@@ -81,6 +85,7 @@ class Vehicle(models.Model):
 # Delivery Model
 # ===================================================
 class Delivery(models.Model):
+    admin = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     """Delivery model to track individual delivery trips"""
 
     STATUS_CHOICES = [
@@ -179,6 +184,7 @@ class LoaderAssignment(models.Model):
 # MonthlyPayment Model
 # ===================================================
 class MonthlyPayment(models.Model):
+    admin = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     """Model to store calculated monthly payments"""
     staff = models.ForeignKey(Staff, on_delete=models.CASCADE)
     year = models.IntegerField()
@@ -201,6 +207,7 @@ class MonthlyPayment(models.Model):
 # # PayrollManager Model
 # # ===================================================
 class PayrollManager(models.Model):
+    admin = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     """Stores payments per delivery per staff member"""
     staff = models.ForeignKey(Staff, on_delete=models.CASCADE)
     delivery = models.ForeignKey(Delivery, on_delete=models.CASCADE)

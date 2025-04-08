@@ -63,11 +63,11 @@
     padding: 3rem 1.5rem;
   }
 
-  .footer {
+  {% comment %} .footer {
     background-color: var(--primary-color);
     color: #fff;
     padding: 2rem 1.5rem;
-  }
+  } {% endcomment %}
 
   .filter-container {
     {% comment %} background-color: #f8f9fa;  {% endcomment %}
@@ -125,9 +125,9 @@
     }
   }
   
-  footer {
+  {% comment %} footer {
     display: none;
-  }
+  } {% endcomment %}
 </style>
 {% endblock custom_style %}
 
@@ -187,13 +187,9 @@
             <p class="stat-number" id="total-deliveries">
               {{ total_deliveries }}
             </p>
-            <div class="columns is-mobile mt-2">
-              <div class="column">
-                <span class="tag is-light is-success is-medium">{{ completed_deliveries }} Completed</span>
-              </div>
-              <div class="column">
-                <span class="tag is-light is-warning is-medium">{{ pending_deliveries }} Pending</span>
-              </div>
+            <div class="tags">
+              <span class="tag is-light is-success is-normal">{{ completed_deliveries }} Completed</span>
+              <span class="tag is-light is-warning is-normal">{{ pending_deliveries }} Pending</span>
             </div>
             <button class="button mt-4 is-primary is-rounded has-text-weight-bold py-4" 
                     onclick="window.location.href='/admin/app/delivery/add/'">
@@ -206,17 +202,11 @@
             <p class="has-text-grey">Active Staff</p>
             <p class="stat-number" id="active-staff">
               {{ active_staff }}
-            </p>
-            <div class="columns is-mobile mt-2">
-              <div class="column">
-                <span class="tag is-light is-info is-medium">{{ active_drivers }} Drivers</span>
-              </div>
-              <div class="column">
-                <span class="tag is-light is-success is-medium">{{ active_turnboys }} Turnboys</span>
-              </div>
-              <div class="column">
-                <span class="tag is-light is-warning is-medium">{{ loaders_available }} Loaders</span>
-              </div>
+            </p>            
+            <div class="tags">
+                <span class="tag is-light is-info is-normal">{{ active_drivers }} Drivers</span>
+                <span class="tag is-light is-success is-normal">{{ active_turnboys }} Turnboys</span>
+                <span class="tag is-light is-warning is-normal">{{ loaders_available }} Loaders</span>
             </div>
             <button class="button mt-4 is-info is-rounded has-text-weight-bold py-4"
                     onclick="window.location.href='/admin/app/staff/add/'">
@@ -227,18 +217,14 @@
         <div class="column is-3">
           <div class="dashboard-card box">
             <p class="has-text-grey">Payment Summary</p>
-            <p class="stat-number">Ksh <span id="total-salary">{{ total_pay|floatformat:2 }}/=</span></p>
-            <div class="columns is-mobile is-multiline mt-2">
-              <div class="column is-12">
-                <p class="has-text-grey">Loading: Ksh {{ total_loading_amount|floatformat:2 }}/=</p>
-              </div>
-              <div class="column is-12">
-                <p class="has-text-grey">Turnboy: Ksh {{ total_turnboy_payments|floatformat:2 }}/=</p>
-              </div>
+            <p class="stat-number"><small>Ksh</small> <span id="total-salary">{{ total_pay|floatformat:2 }}/=</span></p>
+            <div class="mb-4">
+              <p class="has-text-grey">Loading: {{ total_loading_amount|floatformat:2 }}/=</p>
+              <p class="has-text-grey">Turnboy: {{ total_turnboy_payments|floatformat:2 }}/=</p>
             </div>
-            <button class="button is-success mt-4 is-rounded has-text-weight-bold py-4"
+            <button class="button is-link is-rounded has-text-weight-bold py-4"
                     onclick="window.location.href='/admin/app/monthlypayment/'">
-              <i class="fas fa-file-invoice-dollar mr-2"></i>Generate Payroll
+              <i class="fas fa-file-invoice-dollar mr-2"></i>Validate Payrolls
             </button>
           </div>
         </div>
@@ -246,16 +232,10 @@
           <div class="dashboard-card box">
             <p class="has-text-grey">Active Vehicles</p>
             <p class="stat-number" id="active-vehicles">{{ active_vehicles }}</p>
-            <div class="columns is-mobile mt-2">
-              <div class="column">
-                <span class="tag is-light is-primary is-medium">{{ active_trucks }} Trucks</span>
-              </div>
-              <div class="column">
-                <span class="tag is-light is-info is-medium">{{ active_vans }} Vans</span>
-              </div>
-              <div class="column">
-                <span class="tag is-light is-success is-medium">{{ active_buses }} Buses</span>
-              </div>
+            <div class="tags">
+              <span class="tag is-light is-primary is-normal">{{ active_trucks }} Trucks</span>
+              <span class="tag is-light is-info is-normal">{{ active_vans }} Vans</span>
+              <span class="tag is-light is-success is-normal">{{ active_buses }} Buses</span>
             </div>
             <button class="button is-success mt-4 is-rounded has-text-weight-bold py-4"
                     onclick="window.location.href='/admin/app/vehicle/add/'">
