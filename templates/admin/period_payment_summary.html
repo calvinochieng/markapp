@@ -1,0 +1,82 @@
+
+<!-- admin/period_payment_summary.html -->
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+
+<form action="" method="post">
+    {% csrf_token %}
+    <fieldset class="module aligned">
+        {% for field in form %}
+        <div class="form-row">
+            <div class="field-box">
+                {{ field.label_tag }} {{ field }}
+            </div>
+        </div>
+        {% endfor %}
+        <div class="submit-row">
+            <input type="submit" value="Filter">
+        </div>
+    </fieldset>
+</form>
+
+<div class="results">
+    <h2>Summary</h2>
+    <table>
+        <tr>
+            <th>Total Role Payment</th>
+            <td>{{ stats.total_role|floatformat:2 }}</td>
+        </tr>
+        <tr>
+            <th>Total Loader Payment</th>
+            <td>{{ stats.total_loader|floatformat:2 }}</td>
+        </tr>
+        <tr>
+            <th>Total Paid</th>
+            <td>{{ stats.total_paid|floatformat:2 }}</td>
+        </tr>
+        <tr>
+            <th>Total Unpaid</th>
+            <td>{{ stats.total_unpaid|floatformat:2 }}</td>
+        </tr>
+        <tr>
+            <th>Grand Total</th>
+            <td>{{ stats.total|floatformat:2 }}</td>
+        </tr>
+    </table>
+</div>
+
+<div class="results">
+    <h2>Payment Details</h2>
+    {% if payments %}
+    <table>
+        <thead>
+            <tr>
+                <th>Staff Name</th>
+                <th>Role</th>
+                <th>Role Payment</th>
+                <th>Loader Payment</th>
+                <th>Total Payment</th>
+                <th>Paid?</th>
+                <th>Payment Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for payment in payments %}
+            <tr>
+                <td>{{ payment.staff.name }}</td>
+                <td>{{ payment.staff.get_role_display }}</td>
+                <td>{{ payment.role_payment|floatformat:2 }}</td>
+                <td>{{ payment.loader_payment|floatformat:2 }}</td>
+                <td>{{ payment.total_payment|floatformat:2 }}</td>
+                <td>{% if payment.is_paid %}Yes{% else %}No{% endif %}</td>
+                <td>{{ payment.payment_date|default:"-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No payments found for this period.</p>
+    {% endif %}
+</div>
+{% endblock %}

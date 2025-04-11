@@ -1,0 +1,33 @@
+
+<!-- admin/calculate_custom_period_payment.html -->
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p>Calculate custom period payments for the selected staff members:</p>
+<ul>
+    {% for staff_member in staff %}
+    <li>{{ staff_member.name }} ({{ staff_member.get_role_display }})</li>
+    {% endfor %}
+</ul>
+
+<form action="" method="post">
+    {% csrf_token %}
+    <fieldset class="module aligned">
+        {% for field in form %}
+        <div class="form-row">
+            <div class="field-box">
+                {{ field.label_tag }} {{ field }}
+                {% if field.help_text %}
+                <div class="help">{{ field.help_text }}</div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </fieldset>
+    
+    <div class="submit-row">
+        <input type="hidden" name="action" value="calculate_custom_period_payment">
+        <input type="submit" name="apply" value="Calculate Payments">
+    </div>
+</form>
+{% endblock %}

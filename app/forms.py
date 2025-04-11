@@ -1,6 +1,7 @@
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User
+from .models import PaymentPeriod, Staff
 
 class RegistrationForm(UserCreationForm):
     email = forms.EmailField(
@@ -32,3 +33,32 @@ class RegistrationForm(UserCreationForm):
         widgets = {
             'username': forms.TextInput(attrs={'class': 'input'}),
         }
+
+
+
+class PaymentPeriodForm(forms.ModelForm):
+    """Form for creating or updating payment periods"""
+    
+    class Meta:
+        model = PaymentPeriod
+        fields = ['staff', 'period_start', 'period_end', 'is_paid', 'payment_date']
+        widgets = {
+            'period_start': forms.DateInput(attrs={'type': 'date'}),
+            'period_end': forms.DateInput(attrs={'type': 'date'}),
+            'payment_date': forms.DateInput(attrs={'type': 'date'}),
+        }
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Filter active staff only
+        self.fields['staff'].queryset = Staff.objects.filter(is_active=True)
+        
+        # Add CSS classes
+        for field_name, field in self.fields.items():
+            field.widget.attrs['class'] = 'input'
+            
+        # Add placeholders
+        self.fields['staff'].widget.attrs['placeholder'] = 'Select staff member'
+
+
+        

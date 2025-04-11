@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Staff Payroll Management{% endblock title %}
+{% block title %}Period Payroll Management{% endblock title %}
 
 {% block custom_style %}
 <style>
@@ -40,7 +40,6 @@
   }
   
   .filter-container {
-    {% comment %} background-color: #f8f9fa; {% endcomment %}
     border-radius: 8px;
     padding: 1rem;
     margin-bottom: 2rem;
@@ -63,16 +62,6 @@
     z-index: 10;
   }
   
-  .delivery-details {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.3s ease;
-  }
-  
-  .delivery-details.expanded {
-    max-height: 1000px;
-  }
-  
   .staff-row:hover {
     background-color: #f9f9f9;
     cursor: pointer;
@@ -81,88 +70,31 @@
   .staff-row.selected {
     background-color: #eaf5fd;
   }
-  
-  .staff-details-card {
-    border-left: 4px solid var(--primary-color);
-  }
-  
-  @media screen and (max-width: 768px) {
-    .hero {
-      padding: 2rem 1rem;
-    }
-    
-    .stat-number {
-      font-size: 1.8rem;
-    }
-  }
 </style>
 {% endblock custom_style %}
 
 {% block content %}
 <section class="hero">
   <div class="hero-body">
-    <h1 class="title is-2 has-text-centered mb-5">Staff Payroll Management</h1>
+    <h1 class="title is-2 has-text-centered mb-5">{{ page_title }}</h1>
     
-    <!-- Filter Section -->
+    <!-- Date Range Filter Section -->
     <div class="filter-container box mb-5">
-      <h3 class="title is-5 mb-3">Payroll for: {{ selected_month_name }} {{ selected_year }} ({{ date_range }})</h3>
-      <form method="get" id="filter-form" class="columns is-multiline is-vcentered">
-        <div class="column is-2">
+      <h3 class="title is-5 mb-3">Payroll Period: {{ date_range_str }}</h3>
+      <form method="get" id="date-range-form" class="columns is-multiline is-vcentered">
+        <div class="column is-3">
           <div class="field">
-            <label class="label">Year</label>
+            <label class="label">Start Date</label>
             <div class="control">
-              <div class="select is-fullwidth">
-                <select name="year" id="year-select">
-                  {% for year in years %}
-                    <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
-                  {% endfor %}
-                </select>
-              </div>
+              <input type="date" name="start_date" class="input" value="{{ start_date|date:'Y-m-d' }}" required>
             </div>
           </div>
         </div>
-        <div class="column is-2">
+        <div class="column is-3">
           <div class="field">
-            <label class="label">Month</label>
+            <label class="label">End Date</label>
             <div class="control">
-              <div class="select is-fullwidth">
-                <select name="month" id="month-select">
-                  {% for month_num, month_name in months %}
-                    <option value="{{ month_num }}" {% if month_num == selected_month %}selected{% endif %}>{{ month_name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="column is-2">
-          <div class="field">
-            <label class="label">Role</label>
-            <div class="control">
-              <div class="select is-fullwidth">
-                <select name="role" id="role-select">
-                  <option value="" {% if not role_filter %}selected{% endif %}>All Staff</option>
-                  <option value="turnboy" {% if role_filter == 'turnboy' %}selected{% endif %}>Turnboys</option>
-                  <option value="loader" {% if role_filter == 'loader' %}selected{% endif %}>Loaders</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="column is-2">
-          <div class="field">
-            <label class="label">Staff Member</label>
-            <div class="control">
-              <div class="select is-fullwidth">
-                <select name="staff_id" id="staff-select">
-                  <option value="">All Staff</option>
-                  {% for data in payroll_data %}
-                    <option value="{{ data.staff.id }}" {% if selected_staff and selected_staff.id == data.staff.id %}selected{% endif %}>
-                      {{ data.staff.name }} ({{ data.staff.get_role_display }})
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
+              <input type="date" name="end_date" class="input" value="{{ end_date|date:'Y-m-d' }}" required>
             </div>
           </div>
         </div>
@@ -170,7 +102,7 @@
           <div class="field">
             <label class="label">&nbsp;</label>
             <div class="control">
-              <button type="submit" class="button is-primary is-fullwidth">Apply Filter</button>
+              <button type="submit" class="button is-primary is-fullwidth">Apply Date Range</button>
             </div>
           </div>
         </div>
@@ -178,7 +110,7 @@
           <div class="field">
             <label class="label">&nbsp;</label>
             <div class="control">
-              <a href="{{ request.path }}?{{ request.GET.urlencode }}&export=csv" class="button is-info is-fullwidth">
+              <a href="{{ request.path }}?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}&export=csv" class="button is-info is-fullwidth">
                 <span class="icon"><i class="fas fa-file-csv"></i></span>
                 <span>Export CSV</span>
               </a>
@@ -190,114 +122,72 @@
     
     <!-- Stats Cards -->
     <div class="columns is-multiline mb-5">
-      <div class="column is-3">
+      <div class="column is-4">
         <div class="dashboard-card box">
           <p class="has-text-grey">Total Staff</p>
-          <p class="stat-number">{{ total_staff }}</p>
-          <p class="has-text-info">{{ selected_month_name }} {{ selected_year }}</p>
+          <p class="stat-number">{{ staff_page.paginator.count }}</p>
+          <p class="has-text-info">{{ date_range_str }}</p>
         </div>
       </div>
-      <div class="column is-3">
+      <div class="column is-4">
         <div class="dashboard-card box">
-          <p class="has-text-grey">Total Payroll</p>
-          <p class="stat-number">Ksh {{ total_payroll|floatformat:2 }}</p>
-          <p class="has-text-success">{{ selected_month_name }} {{ selected_year }}</p>
+          <p class="has-text-grey">Role Payment Total</p>
+          <p class="stat-number">Ksh {{ role_total|floatformat:2 }}</p>
+          <p class="has-text-success">{{ date_range_str }}</p>
         </div>
       </div>
-      <div class="column is-3">
+      <div class="column is-4">
         <div class="dashboard-card box">
-          <p class="has-text-grey">Turnboy Payments</p>
-          <p class="stat-number">Ksh {{ total_turnboy_pay|floatformat:2 }}</p>
-          <p class="has-text-warning">{{ selected_month_name }} {{ selected_year }}</p>
-        </div>
-      </div>
-      <div class="column is-3">
-        <div class="dashboard-card box">
-          <p class="has-text-grey">Loader Payments</p>
-          <p class="stat-number">Ksh {{ total_loader_pay|floatformat:2 }}</p>
-          <p class="has-text-danger">{{ selected_month_name }} {{ selected_year }}</p>
+          <p class="has-text-grey">Loader Payment Total</p>
+          <p class="stat-number">Ksh {{ loader_total|floatformat:2 }}</p>
+          <p class="has-text-danger">{{ date_range_str }}</p>
         </div>
       </div>
     </div>
     
-    {% if selected_staff %}
-    <!-- Staff Details Card (if specific staff selected) -->
-    <div class="box staff-details-card mb-5">
-      <div class="columns">
-        <div class="column is-4">
-          <h3 class="title is-4">{{ selected_staff.name }}</h3>
-          <p><strong>Role:</strong> {{ selected_staff.get_role_display }}</p>
-          <p><strong>Phone:</strong> {{ selected_staff.phone_number|default:'N/A' }}</p>
-          <p><strong>Joined:</strong> {{ selected_staff.date_joined }}</p>
-          {% if selected_staff.is_loader %}
-            <p><span class="tag is-info">Also works as loader</span></p>
-          {% endif %}
-        </div>
-        <div class="column is-8">
-          <div class="columns is-multiline">
-            <div class="column is-6">
-              <div class="notification is-primary">
-                <p class="heading">Total Payment</p>
-                <p class="title">Ksh {{ payroll_data.0.grand_total|floatformat:2 }}</p>
-              </div>
-            </div>
-            <div class="column is-6">
-              <div class="notification is-info">
-                <p class="heading">Payment Status</p>
-                <p class="title">
-                  {% if payroll_data.0.is_paid %}
-                    <span class="tag is-success is-medium">Paid on {{ payroll_data.0.payment_date }}</span>
-                  {% else %}
-                    <span class="tag is-warning is-medium">Not Paid</span>
-                  {% endif %}
-                </p>
-              </div>
-            </div>
-            <div class="column is-6">
-              <div class="notification is-success">
-                <p class="heading">Turnboy Payment</p>
-                <p class="title">Ksh {{ payroll_data.0.turnboy_total|floatformat:2 }}</p>
-              </div>
-            </div>
-            <div class="column is-6">
-              <div class="notification is-warning">
-                <p class="heading">Loader Payment</p>
-                <p class="title">Ksh {{ payroll_data.0.loader_total|floatformat:2 }}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Staff Deliveries Table -->
+    <!-- Existing Payment Periods Section -->
+    {% if existing_periods %}
     <div class="box mb-5">
-      <h3 class="title is-4 mb-3">Delivery Details</h3>
+      <h3 class="title is-4 mb-3">Recent Payment Periods</h3>
       <div class="data-table-container">
         <table class="table is-fullwidth is-hoverable">
-          <thead>
+          <thead class="sticky-header">
             <tr>
-              <th>Date</th>
-              <th>Vehicle</th>
-              <th>Destination</th>
-              <th>Turnboy Pay</th>
-              <th>Loader Pay</th>
-              <th>Total</th>
+              <th>Period</th>
+              <th>Staff</th>
+              <th>Role Payment</th>
+              <th>Loader Payment</th>
+              <th>Total Payment</th>
+              <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {% for record in payroll_data.0.deliveries %}
+            {% for period in existing_periods %}
             <tr>
-              <td>{{ record.delivery.date }}</td>
-              <td>{{ record.delivery.vehicle.plate_number }}</td>
-              <td>{{ record.delivery.destination }}</td>
-              <td>Ksh {{ record.turnboy_pay|floatformat:2 }}</td>
-              <td>Ksh {{ record.loader_pay|floatformat:2 }}</td>
-              <td><strong>Ksh {{ record.total_pay|floatformat:2 }}</strong></td>
-            </tr>
-            {% empty %}
-            <tr>
-              <td colspan="6" class="has-text-centered">No delivery records found for this staff member</td>
+              <td>{{ period.period_start|date:"M d, Y" }} - {{ period.period_end|date:"M d, Y" }}</td>
+              <td>{{ period.staff.name }}</td>
+              <td>Ksh {{ period.role_payment|floatformat:2 }}</td>
+              <td>Ksh {{ period.loader_payment|floatformat:2 }}</td>
+              <td><strong>Ksh {{ period.total_payment|floatformat:2 }}</strong></td>
+              <td>
+                {% if period.is_paid %}
+                  <span class="tag is-paid">Paid on {{ period.payment_date|date:"M d, Y" }}</span>
+                {% else %}
+                  <span class="tag not-paid">Not Paid</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if not period.is_paid %}
+                <form method="post" action="{% url 'mark_period_paid' period.id %}" style="display:inline;">
+                  {% csrf_token %}
+                  <button type="submit" class="button is-small is-success">
+                    <span class="icon"><i class="fas fa-check"></i></span>
+                    <span>Mark Paid</span>
+                  </button>
+                </form>
+                {% endif %}
+              </td>
             </tr>
             {% endfor %}
           </tbody>
@@ -309,18 +199,19 @@
     <!-- Staff Payroll Table -->
     <form method="post" id="payroll-form">
       {% csrf_token %}
+      <input type="hidden" name="create_payment_period" value="1">
       <div class="box">
         <div class="level">
           <div class="level-left">
             <div class="level-item">
-              <h3 class="title is-4">Staff Payroll</h3>
+              <h3 class="title is-4">Staff Payment Summary</h3>
             </div>
           </div>
           <div class="level-right">
             <div class="level-item">
-              <button type="submit" name="mark_paid" class="button is-success">
-                <span class="icon"><i class="fas fa-check-circle"></i></span>
-                <span>Mark Selected as Paid</span>
+              <button type="submit" class="button is-success">
+                <span class="icon"><i class="fas fa-save"></i></span>
+                <span>Create Payment Periods</span>
               </button>
             </div>
           </div>
@@ -332,91 +223,113 @@
               <tr>
                 <th><input type="checkbox" id="select-all"></th>
                 <th>Staff Name</th>
-                <th>Role</th>
                 <th>Deliveries</th>
-                <th>Turnboy Pay</th>
-                <th>Loader Pay</th>
+                <th>Role Payment</th>
+                <th>Loader Payment</th>
                 <th>Total Pay</th>
                 <th>Status</th>
-                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {% for data in payroll_data %}
-              <tr class="staff-row {% if selected_staff and selected_staff.id == data.staff.id %}selected{% endif %}" data-staff-id="{{ data.staff.id }}">
+              {% for data in staff_page %}
+              <tr class="staff-row">
                 <td>
-                  <input type="checkbox" name="staff_id" value="{{ data.staff.id }}" class="staff-checkbox"
-                         {% if data.is_paid %}disabled{% endif %}>
+                  <input type="checkbox" name="staff_ids" value="{{ data.staff.id }}" class="staff-checkbox"
+                         {% if data.existing_period and data.is_paid %}disabled{% endif %}>
                 </td>
                 <td>{{ data.staff.name }}</td>
-                <td>{{ data.staff.get_role_display }}</td>
+                <td>{{ data.delivery_count }} deliveries</td>
+                <td>Ksh {{ data.role_payment|floatformat:2 }}</td>
+                <td>Ksh {{ data.loader_payment|floatformat:2 }}</td>
+                <td><strong>Ksh {{ data.total_payment|floatformat:2 }}</strong></td>
                 <td>
-                  {% if data.staff.role == 'turnboy' %}
-                    {{ data.delivery_count }} deliveries
-                  {% endif %}
-                  {% if data.staff.is_loader %}
-                    {% if data.staff.role == 'turnboy' %}+ {% endif %}
-                    {{ data.loader_count }} loading jobs
-                  {% endif %}
-                </td>
-                <td>Ksh {{ data.turnboy_total|floatformat:2 }}</td>
-                <td>Ksh {{ data.loader_total|floatformat:2 }}</td>
-                <td><strong>Ksh {{ data.grand_total|floatformat:2 }}</strong></td>
-                <td>
-                  {% if data.is_paid %}
-                    <span class="tag is-paid">Paid on {{ data.payment_date }}</span>
+                  {% if data.existing_period %}
+                    {% if data.is_paid %}
+                      <span class="tag is-paid">Paid on {{ data.payment_date|date:"M d, Y" }}</span>
+                    {% else %}
+                      <span class="tag not-paid">Period Created (Not Paid)</span>
+                    {% endif %}
                   {% else %}
-                    <span class="tag not-paid">Not Paid</span>
+                    <span class="tag is-light">No Payment Period</span>
                   {% endif %}
-                </td>
-                <td>
-                  <a href="?year={{ selected_year }}&month={{ selected_month }}&staff_id={{ data.staff.id }}" 
-                     class="button is-small is-info">
-                    <span class="icon"><i class="fas fa-eye"></i></span>
-                  </a>
                 </td>
               </tr>
               {% empty %}
               <tr>
-                <td colspan="9" class="has-text-centered">No payroll data available for this period</td>
+                <td colspan="7" class="has-text-centered">No payroll data available for this period</td>
               </tr>
               {% endfor %}
             </tbody>
             <tfoot>
               <tr class="is-selected">
-                <td colspan="4"><strong>Totals</strong></td>
-                <td><strong>Ksh {{ total_turnboy_pay|floatformat:2 }}</strong></td>
-                <td><strong>Ksh {{ total_loader_pay|floatformat:2 }}</strong></td>
-                <td><strong>Ksh {{ total_payroll|floatformat:2 }}</strong></td>
-                <td colspan="2"></td>
+                <td colspan="3"><strong>Totals</strong></td>
+                <td><strong>Ksh {{ role_total|floatformat:2 }}</strong></td>
+                <td><strong>Ksh {{ loader_total|floatformat:2 }}</strong></td>
+                <td><strong>Ksh {{ grand_total|floatformat:2 }}</strong></td>
+                <td></td>
               </tr>
             </tfoot>
           </table>
         </div>
+        
+        <!-- Pagination -->
+        {% if staff_page.has_other_pages %}
+        <nav class="pagination is-centered mt-4" role="navigation" aria-label="pagination">
+          {% if staff_page.has_previous %}
+            <a href="?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}&page={{ staff_page.previous_page_number }}" class="pagination-previous">Previous</a>
+          {% else %}
+            <a class="pagination-previous" disabled>Previous</a>
+          {% endif %}
+          
+          {% if staff_page.has_next %}
+            <a href="?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}&page={{ staff_page.next_page_number }}" class="pagination-next">Next</a>
+          {% else %}
+            <a class="pagination-next" disabled>Next</a>
+          {% endif %}
+          
+          <ul class="pagination-list">
+            {% for i in staff_page.paginator.page_range %}
+              {% if staff_page.number == i %}
+                <li><a class="pagination-link is-current" aria-current="page">{{ i }}</a></li>
+              {% else %}
+                <li><a href="?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}&page={{ i }}" class="pagination-link">{{ i }}</a></li>
+              {% endif %}
+            {% endfor %}
+          </ul>
+        </nav>
+        {% endif %}
       </div>
     </form>
+    
+    <!-- Grand Total Summary Card -->
+    <div class="box">
+      <h3 class="title is-4 mb-3">Payroll Summary</h3>
+      <div class="columns">
+        <div class="column is-4">
+          <div class="notification is-primary">
+            <p class="heading">Total Period Payroll</p>
+            <p class="title">Ksh {{ grand_total|floatformat:2 }}</p>
+          </div>
+        </div>
+        <div class="column is-4">
+          <div class="notification is-info">
+            <p class="heading">Role-based Payments</p>
+            <p class="title">Ksh {{ role_total|floatformat:2 }}</p>
+          </div>
+        </div>
+        <div class="column is-4">
+          <div class="notification is-warning">
+            <p class="heading">Loader Payments</p>
+            <p class="title">Ksh {{ loader_total|floatformat:2 }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
 <script>
   document.addEventListener('DOMContentLoaded', function() {
-    // Automatically submit form when filters change
-    document.getElementById('year-select').addEventListener('change', function() {
-      document.getElementById('filter-form').submit();
-    });
-    
-    document.getElementById('month-select').addEventListener('change', function() {
-      document.getElementById('filter-form').submit();
-    });
-    
-    document.getElementById('role-select').addEventListener('change', function() {
-      document.getElementById('filter-form').submit();
-    });
-    
-    document.getElementById('staff-select').addEventListener('change', function() {
-      document.getElementById('filter-form').submit();
-    });
-    
     // Select all checkbox functionality
     const selectAllCheckbox = document.getElementById('select-all');
     const staffCheckboxes = document.querySelectorAll('.staff-checkbox:not([disabled])');
@@ -427,15 +340,27 @@
       });
     });
     
-    // Staff row click to navigate to staff details
-    document.querySelectorAll('.staff-row').forEach(row => {
-      row.addEventListener('click', function(e) {
-        // Don't navigate if clicking on a checkbox
-        if (e.target.type !== 'checkbox') {
-          const staffId = this.getAttribute('data-staff-id');
-          window.location.href = `?year=${document.getElementById('year-select').value}&month=${document.getElementById('month-select').value}&staff_id=${staffId}`;
-        }
-      });
+    // Update select all checkbox when individual checkboxes change
+    staffCheckboxes.forEach(checkbox => {
+      checkbox.addEventListener('change', updateSelectAllCheckbox);
+    });
+    
+    function updateSelectAllCheckbox() {
+      const checkedCount = document.querySelectorAll('.staff-checkbox:not([disabled]):checked').length;
+      const totalCount = staffCheckboxes.length;
+      
+      selectAllCheckbox.checked = totalCount > 0 && checkedCount === totalCount;
+      selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < totalCount;
+    }
+    
+    // Check if at least one staff member is selected before submitting
+    document.getElementById('payroll-form').addEventListener('submit', function(e) {
+      const checkedCount = document.querySelectorAll('.staff-checkbox:checked').length;
+      
+      if (checkedCount === 0) {
+        e.preventDefault();
+        alert('Please select at least one staff member to create payment periods.');
+      }
     });
   });
 </script>

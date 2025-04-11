@@ -33,6 +33,7 @@
     transition: transform 0.3s ease, box-shadow 0.3s ease;
     border-radius: 12px;
     overflow: hidden;
+    height: 100%;
   }
 
   .dashboard-card:hover {
@@ -63,14 +64,7 @@
     padding: 3rem 1.5rem;
   }
 
-  {% comment %} .footer {
-    background-color: var(--primary-color);
-    color: #fff;
-    padding: 2rem 1.5rem;
-  } {% endcomment %}
-
   .filter-container {
-    {% comment %} background-color: #f8f9fa;  {% endcomment %}
     border-radius: 8px;
     padding: 1rem;
     margin-bottom: 2rem;
@@ -111,6 +105,36 @@
     flex-grow: 1;
   }
 
+  .action-button {
+    transition: all 0.3s ease;
+    border-radius: 20px;
+    font-weight: bold;
+    padding: 0.75rem 1.25rem;
+  }
+  
+  .action-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+  }
+  
+  .table-container {
+    border-radius: 8px;
+    overflow: auto;
+  }
+  
+  .table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  
+  .table th {
+    background-color: #f5f5f5;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
   @media screen and (max-width: 768px) {
     .hero {
       padding: 2rem 1rem;
@@ -123,11 +147,16 @@
     .stat-medium {
       font-size: 1.4rem;
     }
+    
+    .columns.is-mobile-stacked {
+      flex-direction: column;
+    }
+    
+    .columns.is-mobile-stacked .column {
+      width: 100%;
+      padding: 0.5rem;
+    }
   }
-  
-  {% comment %} footer {
-    display: none;
-  } {% endcomment %}
 </style>
 {% endblock custom_style %}
 
@@ -139,12 +168,12 @@
       <!-- Date Filter -->
       <div class="filter-container box mb-5">
         <h3 class="title is-5 mb-3">Data for: {{ selected_month_name }} {{ selected_year }} ({{ date_range }})</h3>
-        <form method="get" class="columns is-vcentered">
+        <form method="get" class="columns is-vcentered is-mobile-stacked">
           <div class="column is-3">
             <div class="field">
               <label class="label">Year</label>
               <div class="control">
-                <div class="select is-fullwidth">
+                <div class="select is-fullwidth is-rounded">
                   <select name="year" id="year-select">
                     {% for year in years %}
                       <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
@@ -158,7 +187,7 @@
             <div class="field">
               <label class="label">Month</label>
               <div class="control">
-                <div class="select is-fullwidth">
+                <div class="select is-fullwidth is-rounded">
                   <select name="month" id="month-select">
                     {% for month_num, month_name in months %}
                       <option value="{{ month_num }}" {% if month_num == selected_month %}selected{% endif %}>{{ month_name }}</option>
@@ -172,7 +201,10 @@
             <div class="field">
               <label class="label">&nbsp;</label>
               <div class="control">
-                <button type="submit" class="button is-primary is-fullwidth">Apply Filter</button>
+                <button type="submit" class="button is-primary is-fullwidth is-rounded action-button">
+                  <span class="icon"><i class="fas fa-filter"></i></span>
+                  <span>Apply Filter</span>
+                </button>
               </div>
             </div>
           </div>
@@ -191,7 +223,7 @@
               <span class="tag is-light is-success is-normal">{{ completed_deliveries }} Completed</span>
               <span class="tag is-light is-warning is-normal">{{ pending_deliveries }} Pending</span>
             </div>
-            <button class="button mt-4 is-primary is-rounded has-text-weight-bold py-4" 
+            <button class="button mt-4 is-primary is-rounded action-button is-fullwidth" 
                     onclick="window.location.href='/admin/app/delivery/add/'">
               <i class="fas fa-plus-circle mr-2"></i>New Delivery
             </button>
@@ -208,7 +240,7 @@
                 <span class="tag is-light is-success is-normal">{{ active_turnboys }} Turnboys</span>
                 <span class="tag is-light is-warning is-normal">{{ loaders_available }} Loaders</span>
             </div>
-            <button class="button mt-4 is-info is-rounded has-text-weight-bold py-4"
+            <button class="button mt-4 is-info is-rounded action-button is-fullwidth"
                     onclick="window.location.href='/admin/app/staff/add/'">
               <i class="fas fa-user-plus mr-2"></i> Add Staff
             </button>
@@ -222,7 +254,7 @@
               <p class="has-text-grey">Loading: {{ total_loading_amount|floatformat:2 }}/=</p>
               <p class="has-text-grey">Turnboy: {{ total_turnboy_payments|floatformat:2 }}/=</p>
             </div>
-            <button class="button is-link is-rounded has-text-weight-bold py-4"
+            <button class="button is-link is-rounded action-button is-fullwidth"
                     onclick="window.location.href='/admin/app/monthlypayment/'">
               <i class="fas fa-file-invoice-dollar mr-2"></i>Validate Payrolls
             </button>
@@ -237,7 +269,7 @@
               <span class="tag is-light is-info is-normal">{{ active_vans }} Vans</span>
               <span class="tag is-light is-success is-normal">{{ active_buses }} Buses</span>
             </div>
-            <button class="button is-success mt-4 is-rounded has-text-weight-bold py-4"
+            <button class="button is-success mt-4 is-rounded action-button is-fullwidth"
                     onclick="window.location.href='/admin/app/vehicle/add/'">
               <i class="fas fa-truck mr-2"></i>Add Vehicle
             </button>
@@ -250,117 +282,156 @@
         <!-- Top Destinations -->
         <div class="column is-6">
           <div class="box">
-            <h3 class="title is-4 mb-3">Top Destinations</h3>
-            <table class="table is-fullwidth is-hoverable">
-              <thead>
-                <tr>
-                  <th>Destination</th>
-                  <th>Deliveries</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for destination in top_destinations %}
-                <tr>
-                  <td>{{ destination.destination }}</td>
-                  <td>{{ destination.count }}</td>
-                </tr>
-                {% empty %}
-                <tr>
-                  <td colspan="2" class="has-text-centered">No destination data available</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
+            <h3 class="title is-4 mb-3">
+              <span class="icon has-text-primary"><i class="fas fa-map-marker-alt"></i></span>
+              <span>Top Destinations</span>
+            </h3>
+            <div class="table-container">
+              <table class="table is-fullwidth is-hoverable">
+                <thead>
+                  <tr>
+                    <th>Destination</th>
+                    <th>Deliveries</th>
+                    <th>% of Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for destination in top_destinations %}
+                  <tr>
+                    <td>{{ destination.destination }}</td>
+                    <td>{{ destination.count }}</td>
+                    <td>
+                      {% if total_deliveries > 0 %}
+                        {% widthratio destination.count total_deliveries 100 %}%
+                      {% else %}
+                        0%
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% empty %}
+                  <tr>
+                    <td colspan="3" class="has-text-centered">No destination data available</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
         
         <!-- Top Drivers -->
         <div class="column is-6">
           <div class="box">
-            <h3 class="title is-4 mb-3">Top Drivers</h3>
-            <table class="table is-fullwidth is-hoverable">
-              <thead>
-                <tr>
-                  <th>Driver</th>
-                  <th>Deliveries</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for driver in top_drivers %}
-                <tr>
-                  <td>{{ driver.name }}</td>
-                  <td>{{ driver.delivery_count }}</td>
-                </tr>
-                {% empty %}
-                <tr>
-                  <td colspan="2" class="has-text-centered">No driver data available</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
+            <h3 class="title is-4 mb-3">
+              <span class="icon has-text-info"><i class="fas fa-user-tie"></i></span>
+              <span>Top Drivers</span>
+            </h3>
+            <div class="table-container">
+              <table class="table is-fullwidth is-hoverable">
+                <thead>
+                  <tr>
+                    <th>Driver</th>
+                    <th>Deliveries</th>
+                    <th>% of Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for driver in top_drivers %}
+                  <tr>
+                    <td>{{ driver.name }}</td>
+                    <td>{{ driver.delivery_count }}</td>
+                    <td>
+                      {% if total_deliveries > 0 %}
+                        {% widthratio driver.delivery_count total_deliveries 100 %}%
+                      {% else %}
+                        0%
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% empty %}
+                  <tr>
+                    <td colspan="3" class="has-text-centered">No driver data available</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
       
       <!-- Recent Deliveries Section -->   
       <div class="mt-5">
-        <h2 class="title is-4 mb-4">Recent Deliveries</h2>
-        <div class="box recent-deliveries px-0">
-          <table class="table is-fullwidth is-hoverable">
-            <thead>
-              <tr class="px-4">
-                <th>Date</th>
-                <th>Vehicle</th>
-                <th>Driver</th>
-                <th>Turnboy</th>
-                <th>Location</th>
-                <th>Loading Amt</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for delivery in deliveries %}
+        <h2 class="title is-4 mb-4">
+          <span class="icon has-text-success"><i class="fas fa-truck-loading"></i></span>
+          <span>Recent Deliveries</span>
+        </h2>
+        <div class="box recent-deliveries p-0">
+          <div class="table-container">
+            <table class="table is-fullwidth is-hoverable">
+              <thead>
                 <tr>
-                  <td>{{ delivery.date }}</td>
-                  <td>{{ delivery.vehicle.plate_number }}</td>
-                  <td>{{ delivery.driver.name }}</td>
-                  <td>{{ delivery.turnboy.name }}</td>
-                  <td>{{ delivery.destination }}</td>
-                  <td>Ksh {{ delivery.loading_amount|floatformat:2 }}/=</td>
-                  <td>
-                    {% if delivery.status == 'completed' %}
-                      <span class="tag status-tag completed">Completed</span>
-                    {% elif delivery.status == 'in_progress' %}
-                      <span class="tag status-tag in_progress">In Progress</span>
-                    {% else %}
-                      <span class="tag status-tag pending">Pending</span>
-                    {% endif %}
-                  </td>
-                  <td>
-                    <div class="buttons are-small">
-                      <a href="{% url 'admin:app_delivery_change' delivery.id %}" class="button is-info">
-                        <span class="icon"><i class="fas fa-eye"></i></span>
-                      </a>
-                      <a href="{% url 'admin:app_delivery_change' delivery.id %}" class="button is-warning">
-                        <span class="icon"><i class="fas fa-edit"></i></span>
-                      </a>
-                    </div>
-                  </td>
+                  <th>Date</th>
+                  <th>Vehicle</th>
+                  <th>Driver</th>
+                  <th>Turnboy</th>
+                  <th>Location</th>
+                  <th>Loading Amt</th>
+                  <th>Status</th>
+                  <th>Actions</th>
                 </tr>
-              {% empty %}
-                <tr>
-                  <td colspan="8" class="has-text-centered">No deliveries found for this period</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {% for delivery in deliveries %}
+                  <tr>
+                    <td>{{ delivery.date }}</td>
+                    <td>{{ delivery.vehicle.plate_number }}</td>
+                    <td>{{ delivery.driver.name }}</td>
+                    <td>{{ delivery.turnboy.name }}</td>
+                    <td>{{ delivery.destination }}</td>
+                    <td>Ksh {{ delivery.loading_amount|floatformat:2 }}/=</td>
+                    <td>
+                      {% if delivery.status == 'completed' %}
+                        <span class="tag status-tag completed">Completed</span>
+                      {% elif delivery.status == 'in_progress' %}
+                        <span class="tag status-tag in_progress">In Progress</span>
+                      {% else %}
+                        <span class="tag status-tag pending">Pending</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      <div class="buttons are-small">
+                        <a href="{% url 'admin:app_delivery_change' delivery.id %}" class="button is-info is-rounded">
+                          <span class="icon"><i class="fas fa-eye"></i></span>
+                        </a>
+                        <a href="{% url 'admin:app_delivery_change' delivery.id %}" class="button is-warning is-rounded">
+                          <span class="icon"><i class="fas fa-edit"></i></span>
+                        </a>
+                      </div>
+                    </td>
+                  </tr>
+                {% empty %}
+                  <tr>
+                    <td colspan="8" class="has-text-centered">No deliveries found for this period</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        
+        <!-- View All Deliveries Button -->
+        <div class="has-text-centered mt-4">
+          <a href="/admin/app/delivery/" class="button is-primary is-rounded action-button">
+            <span class="icon"><i class="fas fa-list"></i></span>
+            <span>View All Deliveries</span>
+          </a>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Add JavaScript to make filtering interactive -->
+  <!-- Add JavaScript for interactive filtering and charts -->
   <script>
     document.addEventListener('DOMContentLoaded', function() {
       // Make the year and month selection auto-submit the form
@@ -374,6 +445,29 @@
       monthSelect.addEventListener('change', function() {
         this.form.submit();
       });
+      
+      // Add responsive behavior for tables on small screens
+      const tables = document.querySelectorAll('.table-container');
+      
+      function adjustTables() {
+        if (window.innerWidth < 768) {
+          tables.forEach(table => {
+            table.style.maxWidth = '100%';
+            table.style.overflowX = 'auto';
+          });
+        } else {
+          tables.forEach(table => {
+            table.style.maxWidth = '';
+            table.style.overflowX = '';
+          });
+        }
+      }
+      
+      // Run once on load
+      adjustTables();
+      
+      // Also run on window resize
+      window.addEventListener('resize', adjustTables);
     });
   </script>
 {% endblock content %}

@@ -1,0 +1,415 @@
+{% extends "base.html" %}
+{% block title %}Period Payroll Management{% endblock title %}
+
+{% block custom_style %}
+<style>
+  :root {
+    --primary-color: rgb(0, 128, 255);
+    --secondary-color: #3498db;
+    --accent-color: #e74c3c;
+    --success-color: #2ecc71;
+    --warning-color: #f39c12;
+    --danger-color: #e74c3c;
+    --info-color: #3498db;
+  }
+
+  body {
+    font-family: 'Montserrat', sans-serif;
+  }
+
+  .dashboard-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    border-radius: 12px;
+    overflow: hidden;
+    height: 100%;
+  }
+
+  .dashboard-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    border: 1px #2a2a2e solid;
+  }
+
+  .stat-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+  }
+
+  .filter-container {
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 2rem;
+  }
+
+  .table-container {
+    border-radius: 8px;
+    overflow: auto;
+    max-height: 600px;
+  }
+  
+  .table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  
+  .table th {
+    background-color: #f5f5f5;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .action-button {
+    transition: all 0.3s ease;
+    border-radius: 20px;
+    font-weight: bold;
+    padding: 0.75rem 1.25rem;
+  }
+  
+  .action-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+  }
+  
+  .paid-tag {
+    background-color: var(--success-color);
+    color: white;
+  }
+  
+  .unpaid-tag {
+    background-color: var(--warning-color);
+    color: white;
+  }
+  
+  input[type="date"] {
+    border-radius: 8px;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+  }
+  
+  .summary-box {
+    border-radius: 12px;
+    padding: 1.5rem;
+    background-color: #f8f9fa;
+    margin-bottom: 2rem;
+  }
+  
+  .summary-box h3 {
+    color: var(--primary-color);
+    margin-bottom: 1rem;
+  }
+  
+  .summary-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #eee;
+  }
+  
+  .summary-label {
+    font-weight: 600;
+  }
+  
+  .summary-value {
+    font-weight: 700;
+  }
+  
+  @media screen and (max-width: 768px) {
+    .columns.is-mobile-stacked {
+      flex-direction: column;
+    }
+    
+    .columns.is-mobile-stacked .column {
+      width: 100%;
+      padding: 0.5rem;
+    }
+    
+    .stat-number {
+      font-size: 1.8rem;
+    }
+  }
+</style>
+{% endblock custom_style %}
+
+{% block content %}
+  <section class="hero is-medium">
+    <div class="hero-body">
+      <h1 class="title is-1 has-text-centered mb-5">Period Payroll Management</h1>
+      
+      <!-- Date Filter -->
+      <div class="filter-container box mb-5">
+        <h3 class="title is-5 mb-3">Payment Data for: {{ date_range_str }}</h3>
+        <form method="get" class="columns is-vcentered is-mobile-stacked">
+          <div class="column is-4">
+            <div class="field">
+              <label class="label">Start Date</label>
+              <div class="control">
+                <input type="date" name="start_date" class="input" value="{{ start_date|date:'Y-m-d' }}">
+              </div>
+            </div>
+          </div>
+          <div class="column is-4">
+            <div class="field">
+              <label class="label">End Date</label>
+              <div class="control">
+                <input type="date" name="end_date" class="input" value="{{ end_date|date:'Y-m-d' }}">
+              </div>
+            </div>
+          </div>
+          <div class="column is-2">
+            <div class="field">
+              <label class="label">&nbsp;</label>
+              <div class="control">
+                <button type="submit" class="button is-primary is-fullwidth is-rounded action-button">
+                  <span class="icon"><i class="fas fa-filter"></i></span>
+                  <span>Apply Filter</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+      
+      <!-- Payment Summary -->
+      <div class="summary-box box mb-5">
+        <h3 class="title is-4">
+          <span class="icon has-text-primary"><i class="fas fa-money-bill-wave"></i></span>
+          <span>Payment Summary</span>
+        </h3>
+        <div class="summary-row">
+          <span class="summary-label">Role Payments:</span>
+          <span class="summary-value">Ksh {{ role_total|floatformat:2 }}/=</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Loader Payments:</span>
+          <span class="summary-value">Ksh {{ loader_total|floatformat:2 }}/=</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Total Staff Payments:</span>
+          <span class="summary-value has-text-primary">Ksh {{ grand_total|floatformat:2 }}/=</span>
+        </div>
+      </div>
+      
+      <!-- Payroll Management Form -->
+      <form method="post" id="payrollForm">
+        {% csrf_token %}
+        <input type="hidden" name="create_payment_period" value="1">
+        
+        <!-- Staff Payments Table -->
+        <div class="box">
+          <div class="level">
+            <div class="level-left">
+              <h3 class="title is-4">
+                <span class="icon has-text-info"><i class="fas fa-users"></i></span>
+                <span>Staff Payment Records</span>
+              </h3>
+            </div>
+            <div class="level-right">
+              <button type="submit" class="button is-success is-rounded action-button" id="saveSelectedBtn" disabled>
+                <span class="icon"><i class="fas fa-save"></i></span>
+                <span>Save Selected Payments</span>
+              </button>
+            </div>
+          </div>
+          <div class="table-container">
+            <table class="table is-fullwidth is-hoverable">
+              <thead>
+                <tr>
+                  <th width="5%">
+                    <label class="checkbox">
+                      <input type="checkbox" id="selectAllCheckbox">
+                    </label>
+                  </th>
+                  <th width="25%">Staff Member</th>
+                  <th width="15%">Role</th>
+                  <th width="10%">Deliveries</th>
+                  <th width="15%">Role Pay</th>
+                  <th width="15%">Loader Pay</th>
+                  <th width="15%">Total Pay</th>
+                  <th width="15%">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for staff_payment in staff_page %}
+                  <tr class="{% if staff_payment.existing_period and staff_payment.is_paid %}has-background-success-light{% endif %}">
+                    <td>
+                      {% if not staff_payment.is_paid %}
+                      <label class="checkbox">
+                        <input type="checkbox" name="staff_ids" value="{{ staff_payment.staff.id }}" class="staff-checkbox">
+                      </label>
+                      {% endif %}
+                    </td>
+                    <td>{{ staff_payment.staff.name }}</td>
+                    <td>{{ staff_payment.staff.get_role_display }}</td>
+                    <td>{{ staff_payment.delivery_count }}</td>
+                    <td>Ksh {{ staff_payment.role_payment|floatformat:2 }}/=</td>
+                    <td>Ksh {{ staff_payment.loader_payment|floatformat:2 }}/=</td>
+                    <td class="has-text-weight-bold">Ksh {{ staff_payment.total_payment|floatformat:2 }}/=</td>
+                    <td>
+                      {% if staff_payment.existing_period %}
+                        {% if staff_payment.is_paid %}
+                          <span class="tag paid-tag">Paid on {{ staff_payment.payment_date|date:"M d, Y" }}</span>
+                        {% else %}
+                          <span class="tag unpaid-tag">Unpaid</span>
+                          {% if staff_payment.existing_period %}
+                            <a href="{% url 'mark_period_paid' staff_payment.existing_period.id %}" 
+                              onclick="return confirm('Mark payment as paid for {{ staff_payment.staff.name }}?')"
+                              class="button is-small is-success is-rounded ml-2">
+                              Mark Paid
+                            </a>
+                          {% endif %}
+                        {% endif %}
+                      {% else %}
+                        <span class="tag is-light">Not Processed</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% empty %}
+                  <tr>
+                    <td colspan="8" class="has-text-centered">No payment data found for this period</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          
+          <!-- Pagination -->
+          {% if staff_page.has_other_pages %}
+          <nav class="pagination is-centered mt-4" role="navigation" aria-label="pagination">
+            {% if staff_page.has_previous %}
+              <a href="?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}&page={{ staff_page.previous_page_number }}" 
+                class="pagination-previous">Previous</a>
+            {% else %}
+              <a class="pagination-previous" disabled>Previous</a>
+            {% endif %}
+            
+            {% if staff_page.has_next %}
+              <a href="?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}&page={{ staff_page.next_page_number }}" 
+                class="pagination-next">Next</a>
+            {% else %}
+              <a class="pagination-next" disabled>Next</a>
+            {% endif %}
+            
+            <ul class="pagination-list">
+              {% for i in staff_page.paginator.page_range %}
+                {% if staff_page.number == i %}
+                  <li><a class="pagination-link is-current" aria-label="Page {{ i }}" aria-current="page">{{ i }}</a></li>
+                {% else %}
+                  <li><a href="?start_date={{ start_date|date:'Y-m-d' }}&end_date={{ end_date|date:'Y-m-d' }}&page={{ i }}" 
+                    class="pagination-link" aria-label="Go to page {{ i }}">{{ i }}</a></li>
+                {% endif %}
+              {% endfor %}
+            </ul>
+          </nav>
+          {% endif %}
+        </div>
+      </form>
+      
+      <!-- Recent Payment Periods -->
+      <div class="box mt-5">
+        <h3 class="title is-4">
+          <span class="icon has-text-success"><i class="fas fa-history"></i></span>
+          <span>Recent Payment Periods</span>
+        </h3>
+        <div class="table-container">
+          <table class="table is-fullwidth is-hoverable">
+            <thead>
+              <tr>
+                <th>Staff Member</th>
+                <th>Period</th>
+                <th>Role Pay</th>
+                <th>Loader Pay</th>
+                <th>Total Pay</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for period in existing_periods %}
+                <tr class="{% if period.is_paid %}has-background-success-light{% endif %}">
+                  <td>{{ period.staff.name }}</td>
+                  <td>{{ period.period_start|date:"M d, Y" }} - {{ period.period_end|date:"M d, Y" }}</td>
+                  <td>Ksh {{ period.role_payment|floatformat:2 }}/=</td>
+                  <td>Ksh {{ period.loader_payment|floatformat:2 }}/=</td>
+                  <td>Ksh {{ period.total_payment|floatformat:2 }}/=</td>
+                  <td>
+                    {% if period.is_paid %}
+                      <span class="tag paid-tag">Paid on {{ period.payment_date|date:"M d, Y" }}</span>
+                    {% else %}
+                      <span class="tag unpaid-tag">Unpaid</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <div class="buttons are-small">
+                      {% if not period.is_paid %}
+                        <form method="post" action="{% url 'mark_period_paid' period.id %}">
+                          {% csrf_token %}
+                          <button type="submit" class="button is-success is-rounded"
+                                  onclick="return confirm('Mark payment as paid for {{ period.staff.name }}?')">
+                            <span class="icon"><i class="fas fa-check"></i></span>
+                            <span>Mark Paid</span>
+                          </button>
+                        </form>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% empty %}
+                <tr>
+                  <td colspan="7" class="has-text-centered">No recent payment periods found</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Add JavaScript for interactive features -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      // Handle select all checkbox
+      const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+      const staffCheckboxes = document.querySelectorAll('.staff-checkbox');
+      const saveSelectedBtn = document.getElementById('saveSelectedBtn');
+      
+      // Update save button state
+      function updateSaveButtonState() {
+        const anyChecked = Array.from(staffCheckboxes).some(checkbox => checkbox.checked);
+        saveSelectedBtn.disabled = !anyChecked;
+      }
+      
+      // Select all functionality
+      selectAllCheckbox.addEventListener('change', function() {
+        staffCheckboxes.forEach(checkbox => {
+          checkbox.checked = selectAllCheckbox.checked;
+        });
+        updateSaveButtonState();
+      });
+      
+      // Individual checkbox changes
+      staffCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+          // If any checkbox is unchecked, uncheck "select all"
+          if (!checkbox.checked) {
+            selectAllCheckbox.checked = false;
+          }
+          
+          // If all individual checkboxes are checked, check "select all"
+          const allChecked = Array.from(staffCheckboxes).every(cb => cb.checked);
+          if (allChecked) {
+            selectAllCheckbox.checked = true;
+          }
+          
+          updateSaveButtonState();
+        });
+      });
+      
+      // Initial button state
+      updateSaveButtonState();
+    });
+  </script>
+{% endblock content %}

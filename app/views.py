@@ -2,7 +2,8 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse, HttpResponse
 # /////Django Query Imports////
 from .models import *
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count, Q, F
+from .forms import PaymentPeriodForm  # You'll need to create this form
 
 # ////Utils Imports////
 import csv
@@ -10,6 +11,9 @@ from decimal import Decimal
 from django.contrib import messages
 from django.utils import timezone
 import calendar
+
+from datetime import datetime, timedelta
+from django.core.paginator import Paginator
 
 # ////Auth Imports////
 import logging
@@ -19,6 +23,7 @@ from .forms import RegistrationForm
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
+
 
 def index(request):
     if request.user.is_authenticated:
@@ -55,6 +60,7 @@ def logout_view(request):
     return redirect('login')
 # //////End of Auth Views///////
 
+# /////Dashboard View//////
 @login_required
 def dashboard(request):
     """
@@ -74,14 +80,16 @@ def dashboard(request):
     # Deliveries for the selected month - using select_related for optimization
     deliveries = (Delivery.objects
                  .filter(date__range=date_range)
-                 .select_related('vehicle', 'driver', 'turnboy')
-                 .prefetch_related('loaderassignment_set__loader')
+                 .select_related('vehicle', 'driver')
+                 .prefetch_related(
+                     'staffassignment_set__staff',
+                     'loaderassignment_set__loader'
+                 )
                  .order_by('-date', '-time'))
     
     # Aggregate delivery statistics in a single query
     delivery_stats = deliveries.aggregate(
         total_loading=Sum('loading_amount'),
-        total_turnboy=Sum('turnboy_payment'),
         delivery_count=Count('id'),
         completed_count=Count('id', filter=Q(status='completed')),
         in_progress_count=Count('id', filter=Q(status='in_progress')),
@@ -93,7 +101,7 @@ def dashboard(request):
         'active_total': Staff.objects.filter(is_active=True).count(),
         'drivers': Staff.objects.filter(role='driver', is_active=True).count(),
         'turnboys': Staff.objects.filter(role='turnboy', is_active=True).count(),
-        'loaders': Staff.objects.filter(is_loader=True, is_active=True).count(),
+        'loaders': Staff.objects.filter(Q(role='loader') | Q(is_loader=True), is_active=True).count(),
     }
     
     # Vehicle statistics
@@ -111,29 +119,91 @@ def dashboard(request):
                        .annotate(count=Count('id'))
                        .order_by('-count')[:5])
     
-    # Top performing staff members (based on number of deliveries)
+    # Top performing staff members - now includes all drivers using the driver field
     top_drivers = (Staff.objects
                    .filter(role='driver')
-                   .annotate(delivery_count=Count('driver_deliveries', 
-                                                filter=Q(driver_deliveries__date__range=date_range)))
+                   .annotate(
+                       delivery_count=Count(
+                           'driver_deliveries',
+                           filter=Q(driver_deliveries__date__range=date_range)
+                       )
+                   )
                    .order_by('-delivery_count')[:5])
+    
+    # Top performing turnboys - now uses StaffAssignment model
+    top_turnboys = (Staff.objects
+                    .filter(role='turnboy')
+                    .annotate(
+                        delivery_count=Count(
+                            'staffassignment',
+                            filter=Q(
+                                staffassignment__role='turnboy',
+                                staffassignment__delivery__date__range=date_range
+                            )
+                        )
+                    )
+                    .order_by('-delivery_count')[:5])
     
     # Calculate payment statistics from PayrollManager
     payroll_stats = PayrollManager.objects.filter(
         delivery__date__range=date_range
     ).aggregate(
-        total_turnboy_pay=Sum('turnboy_pay'),
+        total_role_pay=Sum('role_pay'),
         total_loader_pay=Sum('loader_pay'),
         total_pay=Sum('total_pay')
     )
     
-    # Calculate total delivery amount
+    # Payment statistics by role
+    driver_payments = PayrollManager.objects.filter(
+        delivery__date__range=date_range,
+        staff__role='driver'
+    ).aggregate(total=Sum('total_pay'))['total'] or 0
+    
+    turnboy_payments = PayrollManager.objects.filter(
+        delivery__date__range=date_range,
+        staff__role='turnboy'
+    ).aggregate(total=Sum('role_pay'))['total'] or 0
+    
+    loader_payments = PayrollManager.objects.filter(
+        delivery__date__range=date_range,
+        staff__role='loader'
+    ).aggregate(total=Sum('total_pay'))['total'] or 0
+    
+    # Calculate total loading amount
     total_loading_amount = delivery_stats['total_loading'] or 0
-    total_turnboy_payments = delivery_stats['total_turnboy'] or 0
-    total_deliveries_amount = total_loading_amount + total_turnboy_payments
+    
+    # Calculate total payments by role
+    total_role_payments = payroll_stats['total_role_pay'] or 0
+    total_loader_payments = payroll_stats['total_loader_pay'] or 0
+    
+    # Calculate total deliveries amount (including all payments)
+    total_deliveries_amount = total_loading_amount
     
     # Recently completed deliveries
     recent_deliveries = deliveries.filter(status='completed')[:5]
+    
+    # Payments summary
+    monthly_payments = MonthlyPayment.objects.filter(
+        year=selected_year,
+        month=selected_month
+    ).aggregate(
+        paid_amount=Sum('total_payment', filter=Q(is_paid=True)),
+        unpaid_amount=Sum('total_payment', filter=Q(is_paid=False)),
+        total_amount=Sum('total_payment')
+    )
+    
+    # Staff with loading activity - staff who helped with loading for deliveries in this period
+    loading_helpers = (StaffAssignment.objects
+                      .filter(
+                          delivery__date__range=date_range,
+                          helped_loading=True
+                      )
+                      .values('staff__name')
+                      .annotate(
+                          loading_count=Count('id'),
+                          loading_earnings=Sum('delivery__loading_amount') / F('delivery__staffassignment__helped_loading')
+                      )
+                      .order_by('-loading_count')[:5])
     
     # Create list of years and months for filter dropdown
     current_year = timezone.now().year
@@ -155,6 +225,8 @@ def dashboard(request):
         'active_turnboys': staff_stats['turnboys'],
         'loaders_available': staff_stats['loaders'],
         'top_drivers': top_drivers,
+        'top_turnboys': top_turnboys,
+        'loading_helpers': loading_helpers,
         
         # Vehicle information
         'active_vehicles': vehicle_stats['active_total'],
@@ -168,10 +240,17 @@ def dashboard(request):
         # Payment information
         'total_deliveries_amount': total_deliveries_amount,
         'total_loading_amount': total_loading_amount,
-        'total_turnboy_payments': total_turnboy_payments,
-        'total_turnboy_pay': payroll_stats['total_turnboy_pay'] or 0,
-        'total_loader_pay': payroll_stats['total_loader_pay'] or 0,
+        'total_role_payments': total_role_payments,
+        'total_loader_payments': total_loader_payments,
+        'driver_payments': driver_payments,
+        'turnboy_payments': turnboy_payments,
+        'loader_payments': loader_payments,
         'total_pay': payroll_stats['total_pay'] or 0,
+        
+        # Monthly payment stats
+        'monthly_paid': monthly_payments['paid_amount'] or 0,
+        'monthly_unpaid': monthly_payments['unpaid_amount'] or 0,
+        'monthly_total': monthly_payments['total_amount'] or 0,
         
         # Date information for filtering
         'selected_month': selected_month,
@@ -184,8 +263,10 @@ def dashboard(request):
     
     return render(request, 'dashboard/dashboard.html', context)
 
+# //////End of Dashboard View//////
 
-# /////Payroll View//////
+
+# /////MonthlyPayroll View//////
 
 @login_required
 def staff_payroll(request):
@@ -351,3 +432,534 @@ def staff_payroll(request):
 
 # //////End of Payroll View//////
 
+# ////// Period Payroll View //////
+
+@login_required
+def period_payroll(request):
+    """
+    View for managing period-based payroll calculations
+    Allows selecting a custom date range and calculating staff payments
+    """
+    # Get default dates for date range (current month if not specified)
+    today = timezone.now().date()
+    default_end = today
+    default_start = today.replace(day=1)  # First day of current month
+    
+    # Get date range from request or use defaults
+    start_date_str = request.GET.get('start_date')
+    end_date_str = request.GET.get('end_date')
+    
+    try:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else default_start
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else default_end
+    except ValueError:
+        # Handle invalid date format
+        messages.error(request, 'Invalid date format. Using default date range.')
+        start_date = default_start
+        end_date = default_end
+    
+    # Make sure start_date is before end_date
+    if start_date > end_date:
+        messages.warning(request, 'Start date cannot be after end date. Dates have been swapped.')
+        start_date, end_date = end_date, start_date
+    
+    date_range = (start_date, end_date)
+    
+    # Get filters from request
+    staff_id = request.GET.get('staff_id')
+    role_filter = request.GET.get('role')
+    
+    # Get all active staff, excluding drivers (similar to staff_payroll)
+    staff_query = Staff.objects.filter(is_active=True).exclude(role='driver')
+    
+    # Apply role filter if provided
+    if role_filter:
+        if role_filter == 'loader':
+            staff_query = staff_query.filter(is_loader=True)
+        else:
+            staff_query = staff_query.filter(role=role_filter)
+    
+    # Get specific staff member if requested
+    selected_staff = None
+    if staff_id:
+        try:
+            selected_staff = Staff.objects.get(id=staff_id)
+            staff_query = staff_query.filter(id=staff_id)
+        except Staff.DoesNotExist:
+            messages.error(request, f'Staff with ID {staff_id} not found.')
+    
+    # Process form submission for marking payments as paid
+    if request.method == 'POST' and 'mark_paid' in request.POST:
+        selected_staff_ids = request.POST.getlist('staff_ids')
+        
+        if not selected_staff_ids:
+            messages.warning(request, 'No staff members were selected.')
+            return redirect(f"{request.path}?start_date={start_date}&end_date={end_date}")
+        
+        # Update payment periods for each selected staff member
+        update_count = 0
+        for staff_id in selected_staff_ids:
+            try:
+                payment_period = PaymentPeriod.objects.get(
+                    staff_id=staff_id,
+                    period_start=start_date,
+                    period_end=end_date
+                )
+                payment_period.is_paid = True
+                payment_period.payment_date = timezone.now().date()
+                payment_period.save()
+                update_count += 1
+            except PaymentPeriod.DoesNotExist:
+                # If payment period doesn't exist, create it first
+                try:
+                    staff = Staff.objects.get(id=staff_id)
+                    
+                    # Calculate payments for this staff and period
+                    payments = PayrollManager.objects.filter(
+                        staff=staff,
+                        delivery__date__range=date_range
+                    ).aggregate(
+                        role_payment=Sum('role_pay'),
+                        loader_payment=Sum('loader_pay'),
+                        total_payment=Sum('total_pay')
+                    )
+                    
+                    role_payment = payments['role_payment'] or 0
+                    loader_payment = payments['loader_payment'] or 0
+                    total_payment = payments['total_payment'] or 0
+                    
+                    # Create payment period
+                    PaymentPeriod.objects.create(
+                        staff=staff,
+                        period_start=start_date,
+                        period_end=end_date,
+                        role_payment=role_payment,
+                        loader_payment=loader_payment,
+                        total_payment=total_payment,
+                        is_paid=True,
+                        payment_date=timezone.now().date(),
+                        admin=request.user
+                    )
+                    update_count += 1
+                except Staff.DoesNotExist:
+                    messages.error(request, f'Staff with ID {staff_id} not found.')
+                    continue
+        
+        if update_count > 0:
+            messages.success(request, f'Successfully marked {update_count} staff payments as paid.')
+        
+        return redirect(f"{request.path}?start_date={start_date}&end_date={end_date}")
+    
+    # Process form submission for creating payment periods
+    if request.method == 'POST' and 'create_payment_period' in request.POST:
+        selected_staff_ids = request.POST.getlist('staff_ids')
+        
+        if not selected_staff_ids:
+            messages.warning(request, 'No staff members were selected.')
+            return redirect(f"{request.path}?start_date={start_date}&end_date={end_date}")
+        
+        # Create payment periods for each selected staff member
+        created_count = 0
+        for staff_id in selected_staff_ids:
+            try:
+                staff = Staff.objects.get(id=staff_id)
+                
+                # Calculate payments for this staff and period
+                payments = PayrollManager.objects.filter(
+                    staff=staff,
+                    delivery__date__range=date_range
+                ).aggregate(
+                    role_payment=Sum('role_pay'),
+                    loader_payment=Sum('loader_pay'),
+                    total_payment=Sum('total_pay')
+                )
+                
+                role_payment = payments['role_payment'] or 0
+                loader_payment = payments['loader_payment'] or 0
+                total_payment = payments['total_payment'] or 0
+                
+                # Create or update payment period
+                payment_period, created = PaymentPeriod.objects.update_or_create(
+                    staff=staff,
+                    period_start=start_date,
+                    period_end=end_date,
+                    defaults={
+                        'role_payment': role_payment,
+                        'loader_payment': loader_payment,
+                        'total_payment': total_payment,
+                        'admin': request.user
+                    }
+                )
+                
+                created_count += 1
+            except Staff.DoesNotExist:
+                messages.error(request, f'Staff with ID {staff_id} not found.')
+                continue
+        
+        if created_count > 0:
+            messages.success(request, f'Successfully created payment periods for {created_count} staff members.')
+        
+        return redirect(f"{request.path}?start_date={start_date}&end_date={end_date}")
+    
+    # Prepare payroll data for each staff member
+    staff_payments = []
+    total_role_pay = Decimal('0.00')
+    total_loader_pay = Decimal('0.00')
+    total_pay = Decimal('0.00')
+    
+    for staff in staff_query:
+        # Get all payroll records for this staff member in the date range
+        payroll_records = PayrollManager.objects.filter(
+            staff=staff,
+            delivery__date__range=date_range
+        )
+        
+        # Calculate payment totals
+        payment_data = payroll_records.aggregate(
+            role_payment=Sum('role_pay'),
+            loader_payment=Sum('loader_pay'),
+            total_payment=Sum('total_pay'),
+            delivery_count=Count('delivery', distinct=True)
+        )
+        
+        role_payment = payment_data['role_payment'] or Decimal('0.00')
+        loader_payment = payment_data['loader_payment'] or Decimal('0.00')
+        total_payment = payment_data['total_payment'] or Decimal('0.00')
+        delivery_count = payment_data['delivery_count'] or 0
+        
+        # Add to running totals
+        total_role_pay += role_payment
+        total_loader_pay += loader_payment
+        total_pay += total_payment
+        
+        # Check if a PaymentPeriod already exists for this staff and date range
+        existing_period = PaymentPeriod.objects.filter(
+            staff=staff,
+            period_start=start_date,
+            period_end=end_date
+        ).first()
+        
+        # Get delivery details for this staff
+        staff_deliveries = []
+        if selected_staff and staff.id == selected_staff.id:
+            staff_deliveries = payroll_records.select_related('delivery', 'delivery__vehicle').order_by('-delivery__date')
+        
+        # Add to staff_payments list
+        staff_payments.append({
+            'staff': staff,
+            'role_payment': role_payment,
+            'loader_payment': loader_payment,
+            'total_payment': total_payment,
+            'delivery_count': delivery_count,
+            'existing_period': existing_period,
+            'is_paid': existing_period.is_paid if existing_period else False,
+            'payment_date': existing_period.payment_date if existing_period else None,
+            'deliveries': staff_deliveries
+        })
+    
+    # Sort by total payment (highest first)
+    staff_payments.sort(key=lambda x: x['total_payment'], reverse=True)
+    
+    # Handle CSV export
+    if request.GET.get('export') == 'csv':
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="period_payroll_{start_date.strftime("%Y%m%d")}_{end_date.strftime("%Y%m%d")}.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow(['Staff Name', 'Role', 'Deliveries', 'Role Payment', 'Loader Payment', 'Total Payment', 'Status'])
+        
+        for data in staff_payments:
+            staff = data['staff']
+            writer.writerow([
+                staff.name,
+                staff.get_role_display(),
+                data['delivery_count'],
+                data['role_payment'],
+                data['loader_payment'],
+                data['total_payment'],
+                'Paid' if data['is_paid'] else 'Unpaid'
+            ])
+        
+        return response
+    
+    context = {
+        'staff_payments': staff_payments,
+        'start_date': start_date,
+        'end_date': end_date,
+        'selected_staff': selected_staff,
+        'role_filter': role_filter,
+        'date_range': f"{start_date.strftime('%b %d')} - {end_date.strftime('%b %d, %Y')}",
+        'total_payroll': total_pay,
+        'total_role_pay': total_role_pay,
+        'total_loader_pay': total_loader_pay,
+        'total_staff': len(staff_payments),
+    }
+    
+    return render(request, 'payroll/period_payroll.html', context)
+
+@login_required
+def individual_payroll(request):
+    """
+    View for managing individual staff payroll calculations
+    Allows selecting a staff member and date range to calculate payments
+    """
+    # Get default dates for date range (current month if not specified)
+    today = timezone.now().date()
+    default_end = today
+    default_start = today.replace(day=1)  # First day of current month
+    
+    # Get date range from request or use defaults
+    start_date_str = request.GET.get('start_date')
+    end_date_str = request.GET.get('end_date')
+    
+    try:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date() if start_date_str else default_start
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date() if end_date_str else default_end
+    except ValueError:
+        # Handle invalid date format
+        messages.error(request, 'Invalid date format. Using default date range.')
+        start_date = default_start
+        end_date = default_end
+    
+    # Make sure start_date is before end_date
+    if start_date > end_date:
+        messages.warning(request, 'Start date cannot be after end date. Dates have been swapped.')
+        start_date, end_date = end_date, start_date
+    
+    date_range = (start_date, end_date)
+    date_range_str = f"{start_date.strftime('%b %d')} - {end_date.strftime('%b %d, %Y')}"
+    
+    # Get staff ID from request
+    staff_id = request.GET.get('staff_id')
+    
+    # Get all active staff, excluding drivers
+    all_staff = Staff.objects.filter(is_active=True).exclude(role='driver')
+    
+    # Get specific staff member if requested
+    selected_staff = None
+    staff_data = None
+    
+    if staff_id:
+        try:
+            selected_staff = Staff.objects.get(id=staff_id)
+            
+            # Get all payroll records for this staff member in the date range
+            payroll_records = PayrollManager.objects.filter(
+                staff=selected_staff,
+                delivery__date__range=date_range
+            ).select_related('delivery', 'delivery__vehicle')
+            
+            # Calculate payment totals
+            payment_data = payroll_records.aggregate(
+                role_payment=Sum('role_pay'),
+                loader_payment=Sum('loader_pay'),
+                total_payment=Sum('total_pay'),
+                delivery_count=Count('delivery', distinct=True)
+            )
+            
+            role_payment = payment_data['role_payment'] or Decimal('0.00')
+            loader_payment = payment_data['loader_payment'] or Decimal('0.00')
+            total_payment = payment_data['total_payment'] or Decimal('0.00')
+            delivery_count = payment_data['delivery_count'] or 0
+            
+            # Check if a PaymentPeriod already exists for this staff and date range
+            existing_period = PaymentPeriod.objects.filter(
+                staff=selected_staff,
+                period_start=start_date,
+                period_end=end_date
+            ).first()
+            
+            # Get delivery details for this staff
+            deliveries = payroll_records.order_by('-delivery__date')
+            
+            staff_data = {
+                'staff': selected_staff,
+                'role_payment': role_payment,
+                'loader_payment': loader_payment,
+                'total_payment': total_payment,
+                'delivery_count': delivery_count,
+                'existing_period': existing_period,
+                'is_paid': existing_period.is_paid if existing_period else False,
+                'payment_date': existing_period.payment_date if existing_period else None,
+                'deliveries': deliveries
+            }
+            
+        except Staff.DoesNotExist:
+            messages.error(request, f'Staff with ID {staff_id} not found.')
+    
+    # Process form submission for creating payment period
+    if request.method == 'POST' and 'create_payment_period' in request.POST and selected_staff:
+        # Calculate payments for this staff and period
+        payments = PayrollManager.objects.filter(
+            staff=selected_staff,
+            delivery__date__range=date_range
+        ).aggregate(
+            role_payment=Sum('role_pay'),
+            loader_payment=Sum('loader_pay'),
+            total_payment=Sum('total_pay')
+        )
+        
+        role_payment = payments['role_payment'] or 0
+        loader_payment = payments['loader_payment'] or 0
+        total_payment = payments['total_payment'] or 0
+        
+        # Create or update payment period
+        payment_period, created = PaymentPeriod.objects.update_or_create(
+            staff=selected_staff,
+            period_start=start_date,
+            period_end=end_date,
+            defaults={
+                'role_payment': role_payment,
+                'loader_payment': loader_payment,
+                'total_payment': total_payment,
+                'admin': request.user
+            }
+        )
+        
+        if created:
+            messages.success(request, f'Successfully created payment period for {selected_staff.name}.')
+        else:
+            messages.success(request, f'Successfully updated payment period for {selected_staff.name}.')
+        
+        return redirect(f"{request.path}?staff_id={staff_id}&start_date={start_date}&end_date={end_date}")
+    
+    # Process form submission for marking payment as paid
+    if request.method == 'POST' and 'mark_paid' in request.POST and selected_staff:
+        try:
+            payment_period = PaymentPeriod.objects.get(
+                staff=selected_staff,
+                period_start=start_date,
+                period_end=end_date
+            )
+            payment_period.is_paid = True
+            payment_period.payment_date = timezone.now().date()
+            payment_period.save()
+            
+            messages.success(request, f'Payment for {selected_staff.name} marked as paid.')
+        except PaymentPeriod.DoesNotExist:
+            # If payment period doesn't exist, create it first and mark as paid
+            payments = PayrollManager.objects.filter(
+                staff=selected_staff,
+                delivery__date__range=date_range
+            ).aggregate(
+                role_payment=Sum('role_pay'),
+                loader_payment=Sum('loader_pay'),
+                total_payment=Sum('total_pay')
+            )
+            
+            role_payment = payments['role_payment'] or 0
+            loader_payment = payments['loader_payment'] or 0
+            total_payment = payments['total_payment'] or 0
+            
+            PaymentPeriod.objects.create(
+                staff=selected_staff,
+                period_start=start_date,
+                period_end=end_date,
+                role_payment=role_payment,
+                loader_payment=loader_payment,
+                total_payment=total_payment,
+                is_paid=True,
+                payment_date=timezone.now().date(),
+                admin=request.user
+            )
+            
+            messages.success(request, f'Payment period created and marked as paid for {selected_staff.name}.')
+        
+        return redirect(f"{request.path}?staff_id={staff_id}&start_date={start_date}&end_date={end_date}")
+    
+    # Handle CSV export
+    if request.GET.get('export') == 'csv' and selected_staff and staff_data:
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{selected_staff.name}_payroll_{start_date.strftime("%Y%m%d")}_{end_date.strftime("%Y%m%d")}.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow(['Delivery Date', 'Vehicle', 'Role Payment', 'Loader Payment', 'Total Payment'])
+        
+        for delivery in staff_data['deliveries']:
+            writer.writerow([
+                delivery.delivery.date.strftime('%Y-%m-%d'),
+                delivery.delivery.vehicle.name if delivery.delivery.vehicle else 'N/A',
+                delivery.role_pay,
+                delivery.loader_pay,
+                delivery.total_pay
+            ])
+        
+        # Add summary row
+        writer.writerow(['', '', '', '', ''])
+        writer.writerow(['SUMMARY', '', staff_data['role_payment'], staff_data['loader_payment'], staff_data['total_payment']])
+        
+        return response
+    
+    context = {
+        'page_title': 'Individual Staff Payroll',
+        'all_staff': all_staff,
+        'selected_staff': selected_staff,
+        'staff_data': staff_data,
+        'start_date': start_date,
+        'end_date': end_date,
+        'date_range_str': date_range_str,
+    }
+    
+    return render(request, 'payroll/individual_payroll.html', context)
+
+
+@login_required
+def mark_period_paid(request, period_id):
+    """Mark a payment period as paid"""
+    if request.method == 'POST':
+        try:
+            period = PaymentPeriod.objects.get(id=period_id)
+            period.is_paid = True
+            period.payment_date = timezone.now().date()
+            period.save()
+            messages.success(request, f'Payment for {period.staff.name} marked as paid.')
+        except PaymentPeriod.DoesNotExist:
+            messages.error(request, 'Payment period not found.')
+    
+    # Return to the referring page or the period payroll page
+    referer = request.META.get('HTTP_REFERER')
+    if referer:
+        return redirect(referer)
+    return redirect('period_payroll')
+
+# View to create a form for the payment period
+@login_required
+def create_payment_period_form(request):
+    """Create a new payment period form"""
+    if request.method == 'POST':
+        form = PaymentPeriodForm(request.POST)
+        if form.is_valid():
+            payment_period = form.save(commit=False)
+            payment_period.admin = request.user
+            
+            # Calculate payments for this staff and period
+            staff = payment_period.staff
+            date_range = (payment_period.period_start, payment_period.period_end)
+            
+            payments = PayrollManager.objects.filter(
+                staff=staff,
+                delivery__date__range=date_range
+            ).aggregate(
+                role_payment=Sum('role_pay'),
+                loader_payment=Sum('loader_pay'),
+                total_payment=Sum('total_pay')
+            )
+            
+            payment_period.role_payment = payments['role_payment'] or 0
+            payment_period.loader_payment = payments['loader_payment'] or 0
+            payment_period.total_payment = payments['total_payment'] or 0
+            payment_period.save()
+            
+            messages.success(request, f'Payment period created for {staff.name}.')
+            return redirect('period_payroll')
+    else:
+        form = PaymentPeriodForm()
+    
+    context = {
+        'form': form,
+        'page_title': 'Create Payment Period'
+    }
+    
+    return render(request, 'payroll/payment_period_form.html', context)
+
+# ////// End of Period Payroll View //////

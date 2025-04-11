@@ -1,0 +1,401 @@
+{% extends "base.html" %}
+{% block title %}Individual Staff Payroll{% endblock title %}
+
+{% block custom_style %}
+<style>
+  :root {
+    --primary-color: rgb(0, 128, 255);
+    --secondary-color: #3498db;
+    --accent-color: #e74c3c;
+    --success-color: #2ecc71;
+    --warning-color: #f39c12;
+    --danger-color: #e74c3c;
+    --info-color: #3498db;
+  }
+  
+  body {
+    font-family: 'Montserrat', sans-serif;
+  }
+  
+  .dashboard-card {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  
+  .dashboard-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    border: 1px #2a2a2e solid;
+  }
+  
+  .stat-number {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--primary-color);
+  }
+  
+  .data-table-container {
+    overflow-x: auto;
+  }
+  
+  .filter-container {
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 2rem;
+  }
+  
+  .tag.is-paid {
+    background-color: var(--success-color);
+    color: white;
+  }
+  
+  .tag.not-paid {
+    background-color: var(--warning-color);
+    color: white;
+  }
+  
+  .sticky-header {
+    position: sticky;
+    top: 0;
+    background-color: white;
+    z-index: 10;
+  }
+  
+  .staff-row:hover {
+    background-color: #f9f9f9;
+    cursor: pointer;
+  }
+  
+  .staff-row.selected {
+    background-color: #eaf5fd;
+  }
+  
+  .delivery-detail {
+    transition: background-color 0.2s ease;
+  }
+  
+  .delivery-detail:hover {
+    background-color: #f5f5f5;
+  }
+  
+  .profile-image {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid var(--primary-color);
+  }
+  
+  .staff-info {
+    padding: 1.5rem;
+    border-left: 4px solid var(--primary-color);
+  }
+</style>
+{% endblock custom_style %}
+
+{% block content %}
+<section class="hero">
+  <div class="hero-body">
+    <h1 class="title is-2 has-text-centered mb-5">{{ page_title }}</h1>
+    
+    <!-- Staff and Date Range Filter Section -->
+    <div class="filter-container box mb-5">
+      <h3 class="title is-5 mb-3">Select Staff Member and Payroll Period</h3>
+      <form method="get" id="staff-filter-form" class="columns is-multiline is-vcentered">
+        <div class="column is-4">
+          <div class="field">
+            <label class="label">Staff Member</label>
+            <div class="control">
+              <div class="select is-fullwidth">
+                <select name="staff_id" required>
+                  <option value="">-- Select Staff Member --</option>
+                  {% for staff in all_staff %}
+                    <option value="{{ staff.id }}" {% if selected_staff and selected_staff.id == staff.id %}selected{% endif %}>
+                      {{ staff.name }} ({{ staff.get_role_display }})
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="column is-3">
+          <div class="field">
+            <label class="label">Start Date</label>
+            <div class="control">
+              <input type="date" name="start_date" class="input" value="{{ start_date|date:'Y-m-d' }}" required>
+            </div>
+          </div>
+        </div>
+        <div class="column is-3">
+          <div class="field">
+            <label class="label">End Date</label>
+            <div class="control">
+              <input type="date" name="end_date" class="input" value="{{ end_date|date:'Y-m-d' }}" required>
+            </div>
+          </div>
+        </div>
+        <div class="column is-2">
+          <div class="field">
+            <label class="label">&nbsp;</label>
+            <div class="control">
+              <button type="submit" class="button is-primary is-fullwidth">
+                <span class="icon"><i class="fas fa-search"></i></span>
+                <span>View Payroll</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+    
+    {% if selected_staff and staff_data %}
+    <!-- Staff Information and Summary Section -->
+    <div class="box mb-5">
+      <div class="columns">
+        <div class="column is-3 has-text-centered">
+          {% if selected_staff.profile_image %}
+            <img src="{{ selected_staff.profile_image.url }}" alt="{{ selected_staff.name }}" class="profile-image">
+          {% else %}
+            <div class="has-text-centered">
+              <span class="icon is-large">
+                <i class="fas fa-user-circle fa-5x" style="color: var(--primary-color);"></i>
+              </span>
+            </div>
+          {% endif %}
+          <h3 class="title is-4 mt-3">{{ selected_staff.name }}</h3>
+          <p class="subtitle is-6">{{ selected_staff.get_role_display }}</p>
+          <p>
+            {% if selected_staff.is_loader %}
+              <span class="tag is-info">Loader</span>
+            {% endif %}
+            <span class="tag is-primary">{{ selected_staff.role }}</span>
+          </p>
+        </div>
+        <div class="column is-9">
+          <div class="staff-info">
+            <div class="columns is-multiline">
+              <div class="column is-6">
+                <p class="has-text-grey">Employee ID</p>
+                <p class="is-size-5 has-text-weight-bold">{{ selected_staff.employee_id }}</p>
+              </div>
+              <div class="column is-6">
+                <p class="has-text-grey">Phone Number</p>
+                <p class="is-size-5 has-text-weight-bold">{{ selected_staff.phone_number }}</p>
+              </div>
+              <div class="column is-6">
+                <p class="has-text-grey">Status</p>
+                <p class="is-size-5 has-text-weight-bold">
+                  {% if selected_staff.is_active %}
+                    <span class="tag is-success">Active</span>
+                  {% else %}
+                    <span class="tag is-danger">Inactive</span>
+                  {% endif %}
+                </p>
+              </div>
+              <div class="column is-6">
+                <p class="has-text-grey">Joined Date</p>
+                <p class="is-size-5 has-text-weight-bold">{{ selected_staff.date_joined|date:"M d, Y" }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Stats Cards -->
+    <div class="columns is-multiline mb-5">
+      <div class="column is-3">
+        <div class="dashboard-card box">
+          <p class="has-text-grey">Period</p>
+          <p class="stat-number is-size-4">{{ date_range_str }}</p>
+          <p class="has-text-info">{{ staff_data.delivery_count }} deliveries</p>
+        </div>
+      </div>
+      <div class="column is-3">
+        <div class="dashboard-card box">
+          <p class="has-text-grey">Role Payment</p>
+          <p class="stat-number">Ksh {{ staff_data.role_payment|floatformat:2 }}</p>
+          <p class="has-text-success">{{ selected_staff.get_role_display }}</p>
+        </div>
+      </div>
+      <div class="column is-3">
+        <div class="dashboard-card box">
+          <p class="has-text-grey">Loader Payment</p>
+          <p class="stat-number">Ksh {{ staff_data.loader_payment|floatformat:2 }}</p>
+          <p class="has-text-danger">{% if selected_staff.is_loader %}Active Loader{% else %}Not a Loader{% endif %}</p>
+        </div>
+      </div>
+      <div class="column is-3">
+        <div class="dashboard-card box">
+          <p class="has-text-grey">Total Payment</p>
+          <p class="stat-number">Ksh {{ staff_data.total_payment|floatformat:2 }}</p>
+          <p class="has-text-primary">
+            {% if staff_data.is_paid %}
+              <span class="tag is-paid">Paid on {{ staff_data.payment_date|date:"M d, Y" }}</span>
+            {% else %}
+              <span class="tag not-paid">Not Paid</span>
+            {% endif %}
+          </p>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Actions Section -->
+    <div class="level mb-5">
+      <div class="level-left">
+        <div class="level-item">
+          <h3 class="title is-4">Payment Actions</h3>
+        </div>
+      </div>
+      <div class="level-right">
+        <div class="level-item">
+          <a href="{{ request.get_full_path }}&export=csv" class="button is-info">
+            <span class="icon"><i class="fas fa-file-csv"></i></span>
+            <span>Export CSV</span>
+          </a>
+        </div>
+        <div class="level-item">
+          {% if not staff_data.existing_period %}
+            <form method="post">
+              {% csrf_token %}
+              <input type="hidden" name="create_payment_period" value="1">
+              <button type="submit" class="button is-primary">
+                <span class="icon"><i class="fas fa-save"></i></span>
+                <span>Create Payment Period</span>
+              </button>
+            </form>
+          {% elif not staff_data.is_paid %}
+            <form method="post">
+              {% csrf_token %}
+              <input type="hidden" name="mark_paid" value="1">
+              <button type="submit" class="button is-success">
+                <span class="icon"><i class="fas fa-check"></i></span>
+                <span>Mark as Paid</span>
+              </button>
+            </form>
+          {% else %}
+            <button class="button is-success" disabled>
+              <span class="icon"><i class="fas fa-check-circle"></i></span>
+              <span>Already Paid</span>
+            </button>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    
+    <!-- Delivery Details Table -->
+    <div class="box mb-5">
+      <h3 class="title is-4 mb-3">Delivery Details ({{ date_range_str }})</h3>
+      <div class="data-table-container">
+        <table class="table is-fullwidth is-hoverable">
+          <thead class="sticky-header">
+            <tr>
+              <th>Date</th>
+              <th>Vehicle</th>
+              <th>Route</th>
+              <th>Role Payment</th>
+              <th>Loader Payment</th>
+              <th>Total Payment</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for record in staff_data.deliveries %}
+            <tr class="delivery-detail">
+              <td>{{ record.delivery.date|date:"M d, Y" }}</td>
+              <td>{{ record.delivery.vehicle.name|default:"N/A" }}</td>
+              <td>{{ record.delivery.route|default:"N/A" }}</td>
+              <td>Ksh {{ record.role_pay|floatformat:2 }}</td>
+              <td>Ksh {{ record.loader_pay|floatformat:2 }}</td>
+              <td><strong>Ksh {{ record.total_pay|floatformat:2 }}</strong></td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="6" class="has-text-centered">No delivery records found for this period</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="is-selected">
+              <td colspan="3"><strong>Totals</strong></td>
+              <td><strong>Ksh {{ staff_data.role_payment|floatformat:2 }}</strong></td>
+              <td><strong>Ksh {{ staff_data.loader_payment|floatformat:2 }}</strong></td>
+              <td><strong>Ksh {{ staff_data.total_payment|floatformat:2 }}</strong></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+    
+    <!-- Payment History Section -->
+    <div class="box">
+      <h3 class="title is-4 mb-3">Payment History</h3>
+      <div class="data-table-container">
+        <table class="table is-fullwidth is-hoverable">
+          <thead class="sticky-header">
+            <tr>
+              <th>Period</th>
+              <th>Role Payment</th>
+              <th>Loader Payment</th>
+              <th>Total Payment</th>
+              <th>Status</th>
+              <th>Created By</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for period in selected_staff.paymentperiod_set.all|slice:":10" %}
+            <tr>
+              <td>{{ period.period_start|date:"M d, Y" }} - {{ period.period_end|date:"M d, Y" }}</td>
+              <td>Ksh {{ period.role_payment|floatformat:2 }}</td>
+              <td>Ksh {{ period.loader_payment|floatformat:2 }}</td>
+              <td><strong>Ksh {{ period.total_payment|floatformat:2 }}</strong></td>
+              <td>
+                {% if period.is_paid %}
+                  <span class="tag is-paid">Paid on {{ period.payment_date|date:"M d, Y" }}</span>
+                {% else %}
+                  <span class="tag not-paid">Not Paid</span>
+                {% endif %}
+              </td>
+              <td>{{ period.admin.username }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="6" class="has-text-centered">No payment history found</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% elif selected_staff %}
+    <!-- No data found for the selected staff -->
+    <div class="box has-text-centered">
+      <p class="title is-4">No payroll data found for {{ selected_staff.name }} in the selected period.</p>
+      <p class="subtitle is-6">Try adjusting the date range or check if there are any deliveries recorded for this staff member.</p>
+    </div>
+    {% else %}
+    <!-- Initial state - no staff selected -->
+    <div class="box has-text-centered">
+      <p class="title is-4">Select a staff member to view individual payroll information</p>
+      <p class="subtitle is-6">Choose a staff member and date range from the filters above to see detailed payroll information.</p>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // Add any necessary client-side functionality here
+    
+    // Highlight the current row when clicked
+    const deliveryRows = document.querySelectorAll('.delivery-detail');
+    deliveryRows.forEach(row => {
+      row.addEventListener('click', function() {
+        deliveryRows.forEach(r => r.classList.remove('is-selected'));
+        this.classList.add('is-selected');
+      });
+    });
+  });
+</script>
+{% endblock content %}
