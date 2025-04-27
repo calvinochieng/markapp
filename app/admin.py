@@ -4,14 +4,14 @@ from django.shortcuts import render, redirect
 from django.http import HttpResponse
 from django import forms
 from django.contrib import messages
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count, Q, F
 from django.utils import timezone
 from decimal import Decimal
 import calendar
 import csv
 from io import StringIO
 from .models import (
-    Staff, Vehicle, Delivery, LoaderAssignment, 
+    Staff, Vehicle, Delivery, 
     MonthlyPayment, PayrollManager, PaymentPeriod, StaffAssignment
 )
 
@@ -26,12 +26,14 @@ class StaffAssignmentInline(admin.TabularInline):
     autocomplete_fields = ['staff']
     fields = ['staff', 'role', 'helped_loading']
 
-# Inline for Loader Assignments (dedicated loaders)
-class LoaderAssignmentInline(admin.TabularInline):
-    model = LoaderAssignment
-    extra = 1
-    autocomplete_fields = ['loader']
-    fields = ['loader', 'helped_loading']
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        # Filter staff to only show turnboys and loaders for assignments
+        if db_field.name == "staff":
+            kwargs["queryset"] = Staff.objects.filter(
+                Q(role__in=['turnboy', 'loader']) & Q(is_active=True)
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
 
 # PayrollManager Admin
 @admin.register(PayrollManager)
@@ -40,24 +42,38 @@ class PayrollManagerAdmin(admin.ModelAdmin):
     list_filter = ('staff__role', 'delivery__date')
     search_fields = ('staff__name', 'delivery__destination')
     date_hierarchy = 'date_recorded'
-    readonly_fields = ('total_pay',)
+    readonly_fields = ('total_pay', 'staff', 'delivery', 'date_recorded')
+    
+    def has_add_permission(self, request):
+        # Prevent direct creation as these are generated automatically
+        return False
+    
+    def get_queryset(self, request):
+        # Order by most recent first
+        return super().get_queryset(request).order_by('-delivery__date', 'staff__name')
+    
+    def has_delete_permission(self, request, obj=None):
+        # Allow deletion for testing but warn in the template
+        return True
+
 
 # Delivery Admin
 @admin.register(Delivery)
 class DeliveryAdmin(admin.ModelAdmin):
     list_display = ('date', 'vehicle', 'display_driver', 'display_turnboys', 
-                   'destination', 'loading_amount', 'loader_count', 'status')
+                   'destination', 'loading_amount', 'loader_count', 'display_loading_payments', 'status')
     list_filter = ('date', 'vehicle', 'status', 'driver')
     search_fields = ('destination', 'items_carried')
     date_hierarchy = 'date'
-    inlines = [StaffAssignmentInline, LoaderAssignmentInline]
+    inlines = [StaffAssignmentInline]
     autocomplete_fields = ['vehicle', 'driver']
+    readonly_fields = ('display_payment_details',)
     fieldsets = (
         ('Delivery Information', {
             'fields': ('date', 'time', 'vehicle', 'driver', 'destination', 'status')
         }),
         ('Financial Information', {
-            'fields': ('loading_amount', 'turnboy_payment_rate')
+            'fields': ('loading_amount', 'turnboy_payment_rate', 'display_payment_details')
         }),
         ('Details', {
             'fields': ('items_carried', 'notes', 'delivery_note_image')
@@ -70,23 +86,150 @@ class DeliveryAdmin(admin.ModelAdmin):
     
     def display_turnboys(self, obj):
         turnboys = StaffAssignment.objects.filter(delivery=obj, role='turnboy')
-        return ", ".join([t.staff.name for t in turnboys]) if turnboys else "None"
+        if not turnboys:
+            return "None"
+        
+        # Show turnboy names and indicate if they're loading
+        turnboy_info = []
+        for t in turnboys:
+            loading_status = " (loading)" if t.helped_loading else ""
+            turnboy_info.append(f"{t.staff.name}{loading_status}")
+        
+        return ", ".join(turnboy_info)
     display_turnboys.short_description = 'Turnboys'
     
     def loader_count(self, obj):
-        # Count both dedicated loaders and staff who helped with loading
-        dedicated_loaders = obj.loaderassignment_set.filter(helped_loading=True).count()
-        staff_loaders = obj.staffassignment_set.filter(helped_loading=True).count()
-        return dedicated_loaders + staff_loaders
+        # Count staff who helped with loading
+        return obj.staffassignment_set.filter(helped_loading=True).count()
     loader_count.short_description = 'Total Loaders'
+    
+    def display_loading_payments(self, obj):
+        if not obj.id:
+            return "N/A"
+            
+        loaders = obj.staffassignment_set.filter(helped_loading=True)
+        if not loaders:
+            return "No loaders"
+            
+        loader_count = loaders.count()
+        per_loader = obj.loading_amount / loader_count if loader_count > 0 else 0
+        
+        return f"Ksh {per_loader:.2f} per loader ({loader_count} loaders)"
+    display_loading_payments.short_description = 'Loading Payments'
+    
+    def display_payment_details(self, obj):
+        """Display payment details for this delivery"""
+        if not obj.id:
+            return "Save delivery first to see payment details"
+            
+        html = "<h3>Payment Details</h3>"
+        html += "<table style='width:100%; border-collapse:collapse;'>"
+        html += "<tr style='background-color:#f0f0f0;'>"
+        html += "<th style='border:1px solid #ddd; padding:8px; text-align:left;'>Staff</th>"
+        html += "<th style='border:1px solid #ddd; padding:8px; text-align:left;'>Role</th>"
+        html += "<th style='border:1px solid #ddd; padding:8px; text-align:left;'>Fixed Pay</th>"
+        html += "<th style='border:1px solid #ddd; padding:8px; text-align:left;'>Loading Pay</th>"
+        html += "<th style='border:1px solid #ddd; padding:8px; text-align:left;'>Total Pay</th>"
+        html += "</tr>"
+        
+        # Get PayrollManager records
+        payroll_records = PayrollManager.objects.filter(delivery=obj).select_related('staff')
+        
+        if not payroll_records:
+            html += "<tr><td colspan='5' style='border:1px solid #ddd; padding:8px;'>No payment records found</td></tr>"
+        else:
+            for record in payroll_records:
+                html += f"<tr style='border:1px solid #ddd;'>"
+                html += f"<td style='border:1px solid #ddd; padding:8px;'>{record.staff.name}</td>"
+                html += f"<td style='border:1px solid #ddd; padding:8px;'>{record.staff.get_role_display()}</td>"
+                html += f"<td style='border:1px solid #ddd; padding:8px;'>Ksh {record.role_pay:.2f}</td>"
+                html += f"<td style='border:1px solid #ddd; padding:8px;'>Ksh {record.loader_pay:.2f}</td>"
+                html += f"<td style='border:1px solid #ddd; padding:8px;'><b>Ksh {record.total_pay:.2f}</b></td>"
+                html += "</tr>"
+        
+        html += "</table>"
+        
+        # Add a section for loading breakdown
+        html += "<h4 style='margin-top:15px;'>Loading Payment Breakdown</h4>"
+        html += "<p>Total loading amount: Ksh {:.2f}</p>".format(obj.loading_amount)
+        
+        total_loaders = obj.staffassignment_set.filter(helped_loading=True).count()
+        if total_loaders > 0:
+            per_loader = obj.loading_amount / total_loaders
+            html += "<p>Per-loader payment: Ksh {:.2f} ({} helpers)</p>".format(per_loader, total_loaders)
+        else:
+            html += "<p>No loading helpers assigned.</p>"
+        
+        # Add explanation based on scenario
+        loaders = obj.staffassignment_set.filter(helped_loading=True)
+        turnboys = obj.staffassignment_set.filter(role='turnboy')
+        loading_turnboys = turnboys.filter(helped_loading=True)
+        
+        html += "<h4 style='margin-top:15px;'>Applied Scenario</h4>"
+        
+        if turnboys.count() == 1 and loading_turnboys.count() == 1 and loaders.count() == 1:
+            # Scenario 1: Single turnboy who loads
+            html += "<p><b>Scenario 1:</b> Single turnboy handling loading. The turnboy receives both the "
+            html += "fixed turnboy payment (Ksh {:.2f}) and the full loading amount (Ksh {:.2f}).</p>".format(
+                obj.turnboy_payment_rate, obj.loading_amount
+            )
+        elif turnboys.count() > 1 and loading_turnboys.count() > 1:
+            # Scenario 2: Multiple turnboys all loading
+            html += "<p><b>Scenario 2:</b> Multiple turnboys all helping with loading. Each turnboy receives their "
+            html += "fixed payment (Ksh {:.2f}) plus an equal share of the loading money (Ksh {:.2f} each).</p>".format(
+                obj.turnboy_payment_rate, obj.loading_amount / loaders.count()
+            )
+        elif turnboys.count() > 1 and loading_turnboys.count() == 1:
+            # Scenario 3: Multiple turnboys, only one loading
+            html += "<p><b>Scenario 3:</b> Multiple turnboys with only one handling loading. The loading turnboy "
+            html += "receives both fixed payment (Ksh {:.2f}) and loading payment (Ksh {:.2f}), ".format(
+                obj.turnboy_payment_rate, obj.loading_amount / loaders.count()
+            )
+            html += "while non-loading turnboys only receive their fixed payment.</p>"
+        elif loaders.count() > turnboys.filter(helped_loading=True).count():
+            # Scenario 4: Turnboys plus other loaders
+            html += "<p><b>Scenario 4:</b> Turnboys plus additional loaders. The loading amount "
+            html += "(Ksh {:.2f}) is divided equally among all {} loading helpers. ".format(
+                obj.loading_amount, loaders.count()
+            )
+            html += "Each gets Ksh {:.2f} for loading. Turnboys also receive their fixed payment.</p>".format(
+                obj.loading_amount / loaders.count()
+            )
+        else:
+            html += "<p>Custom scenario - see the payment breakdown above for details.</p>"
+        
+        return mark_safe(html)
+    display_payment_details.short_description = 'Payment Details'
+    
 
 # Staff Admin
 @admin.register(Staff)
 class StaffAdmin(admin.ModelAdmin):
-    list_display = ('name', 'role', 'is_loader', 'is_active', 'phone_number', 'date_joined')
+    list_display = ('name', 'role', 'is_loader', 'is_active', 'phone_number', 'date_joined', 'display_payments_month')
     list_filter = ('role', 'is_loader', 'is_active')
     search_fields = ('name', 'phone_number')
-    actions = ['calculate_monthly_payment', 'calculate_custom_period_payment']
+    actions = ['calculate_monthly_payment', 'calculate_custom_period_payment', 'export_staff_payments_csv']
+    
+    def get_queryset(self, request):
+        # Annotate with payment info for current month
+        today = timezone.now().date()
+        start_date = today.replace(day=1)
+        _, last_day = calendar.monthrange(today.year, today.month)
+        end_date = today.replace(day=last_day)
+        
+        return super().get_queryset(request).annotate(
+            current_month_pay=Sum(
+                'payrollmanager__total_pay',
+                filter=Q(payrollmanager__delivery__date__range=(start_date, end_date))
+            )
+        )
+    
+    def display_payments_month(self, obj):
+        # Display payments for current month
+        if hasattr(obj, 'current_month_pay') and obj.current_month_pay:
+            return f"Ksh {obj.current_month_pay:.2f}"
+        return "Ksh 0.00"
+    display_payments_month.short_description = f"Earnings ({timezone.now().strftime('%b %Y')})"
     
     def calculate_monthly_payment(self, request, queryset):
         """Admin action to calculate monthly payments for selected staff"""
@@ -185,6 +328,37 @@ class StaffAdmin(admin.ModelAdmin):
             context={"staff": queryset, "form": form, "title": "Calculate Custom Period Payment"}
         )
     calculate_custom_period_payment.short_description = "Calculate payment for custom period"
+    
+    def export_staff_payments_csv(self, request, queryset):
+        """Export detailed payment history for selected staff"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="staff_payment_details.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow([
+            'Staff Name', 'Role', 'Delivery Date', 'Destination',
+            'Fixed Pay', 'Loading Pay', 'Total Pay'
+        ])
+        
+        for staff in queryset:
+            # Get all payroll entries for this staff, ordered by date
+            payroll_entries = PayrollManager.objects.filter(staff=staff).select_related(
+                'delivery'
+            ).order_by('-delivery__date')
+            
+            for entry in payroll_entries:
+                writer.writerow([
+                    staff.name,
+                    staff.get_role_display(),
+                    entry.delivery.date,
+                    entry.delivery.destination,
+                    entry.role_pay,
+                    entry.loader_pay,
+                    entry.total_pay
+                ])
+        
+        return response
+    export_staff_payments_csv.short_description = "Export detailed payment history (CSV)"
 
 # Vehicle Admin
 @admin.register(Vehicle)
@@ -389,15 +563,33 @@ class PaymentPeriodAdmin(admin.ModelAdmin):
 # Staff Assignment Admin
 @admin.register(StaffAssignment)
 class StaffAssignmentAdmin(admin.ModelAdmin):
-    list_display = ('staff', 'delivery', 'role', 'helped_loading')
+    list_display = ('staff', 'delivery', 'role', 'helped_loading', 'display_payments')
     list_filter = ('role', 'helped_loading', 'delivery__date')
     search_fields = ('staff__name', 'delivery__destination')
     autocomplete_fields = ['staff', 'delivery']
+    
+    def display_payments(self, obj):
+        """Display payment info for this staff assignment"""
+        if not obj.id:
+            return "N/A"
+            
+        try:
+            payroll = PayrollManager.objects.get(staff=obj.staff, delivery=obj.delivery)
+            if obj.helped_loading:
+                return f"Role: Ksh {payroll.role_pay:.2f}, Loading: Ksh {payroll.loader_pay:.2f}"
+            else:
+                return f"Role: Ksh {payroll.role_pay:.2f}"
+        except PayrollManager.DoesNotExist:
+            return "No payment record"
+    display_payments.short_description = "Payments"
+    
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        # Filter staff to only show turnboys and loaders
+        if db_field.name == "staff":
+            kwargs["queryset"] = Staff.objects.filter(
+                Q(role__in=['turnboy', 'loader']) & Q(is_active=True)
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-# Loader Assignment Admin
-@admin.register(LoaderAssignment)
-class LoaderAssignmentAdmin(admin.ModelAdmin):
-    list_display = ('loader', 'delivery', 'helped_loading')
-    list_filter = ('helped_loading', 'delivery__date')
-    search_fields = ('loader__name', 'delivery__destination')
-    autocomplete_fields = ['loader', 'delivery']
+# Add missing import for mark_safe
+from django.utils.safestring import mark_safe

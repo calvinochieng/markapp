@@ -15,7 +15,6 @@ class Staff(models.Model):
     admin = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     """Staff model to represent drivers, turnboys, and loaders"""
     ROLE_CHOICES = [
-        ('driver', 'Driver'),
         ('turnboy', 'Turnboy'),
         ('loader', 'Loader'),
     ]
@@ -72,7 +71,7 @@ class Vehicle(models.Model):
         ('bus', 'Bus'),
         ('other', 'Other'),
     ]
-    
+    driver = models.CharField(max_length=100, blank=True, null=True)
     plate_number = models.CharField(max_length=20, unique=True)
     vehicle_type = models.CharField(max_length=50, choices=VEHICLE_TYPE_CHOICES, blank=True)
     capacity = models.CharField(max_length=50, blank=True)
@@ -98,20 +97,11 @@ class Delivery(models.Model):
     
     date = models.DateField(db_index=True)
     delivery_note_image = models.ImageField(upload_to='delivery_notes/', blank=True, null=True)
-    time = models.TimeField()
     vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, db_index=True)
-    driver = models.ForeignKey(
-        Staff, related_name='driver_deliveries', on_delete=models.CASCADE,
-        limit_choices_to={'role': 'driver'}, db_index=True
-    )
     turnboy_payment_rate = models.DecimalField(
         max_digits=10, decimal_places=2, default=200.00,
         help_text="Base payment rate for turnboys for this delivery; can be adjusted based on distance"
-    )
-    status = models.CharField(
-        max_length=20, choices=STATUS_CHOICES, default='completed',
-        help_text="Status of the delivery"
-    )    
+    )   
     destination = models.CharField(max_length=100)
     items_carried = models.TextField()
     loading_amount = models.DecimalField(
@@ -125,7 +115,7 @@ class Delivery(models.Model):
         ordering = ['-date']
 
     def __str__(self):
-        driver_name = self.driver.name if self.driver else "No driver"
+        driver_name = self.vehicle.driver if self.vehicle else "No driver"
         turnboys = ", ".join([assign.staff.name for assign in self.staffassignment_set.filter(role='turnboy')])
         turnboys_str = f" (Turnboys: {turnboys})" if turnboys else ""
         
@@ -156,11 +146,17 @@ class Delivery(models.Model):
 # ===================================================
 class StaffAssignment(models.Model):
     """Model to track which staff worked on which deliveries and in what capacity"""
+    ROLE_CHOICES = [
+        ('turnboy', 'Turnboy'),
+        ('loader', 'Loader'),
+    ]
     delivery = models.ForeignKey(Delivery, on_delete=models.CASCADE)
-    staff = models.ForeignKey(Staff,
-          on_delete=models.CASCADE,
-        limit_choices_to={'role': 'turnboy'},)
-    role = models.CharField(max_length=20, choices=Staff.ROLE_CHOICES)
+    staff = models.ForeignKey(
+        Staff,
+        on_delete=models.CASCADE,
+        limit_choices_to={'role__in': ['turnboy', 'loader']},  # Only include these
+    )
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     helped_loading = models.BooleanField(
         default=False, 
         help_text="Set to True if this staff member helped with loading"
@@ -170,26 +166,15 @@ class StaffAssignment(models.Model):
         unique_together = ('delivery', 'staff', 'role')  # Staff can have only one role per delivery
     
     def __str__(self):
-        loading_str = " (helped loading)" if self.helped_loading else ""
-        return f"{self.staff.name} as {self.get_role_display()} for {self.delivery}{loading_str}"
-
-class LoaderAssignment(models.Model):
-    """Model to track which dedicated loaders worked on which deliveries"""
-    delivery = models.ForeignKey(Delivery, on_delete=models.CASCADE)
-    loader = models.ForeignKey(
-        Staff, on_delete=models.CASCADE, 
-        limit_choices_to={'role': 'loader'}  # Only dedicated loaders
-    )
-    helped_loading = models.BooleanField(
-        default=True,  # Presumably dedicated loaders always help with loading
-        help_text="Set to True if this loader helped with loading (normally always True)"
-    )
+        return f"{self.staff.name} as {self.get_role_display()} for {self.delivery}"
     
-    class Meta:
-        unique_together = ('delivery', 'loader')  # Ensures a loader can only be assigned once per delivery
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        if self.role == 'loader':
+            # Make sure the helped_loading field is set to True for loaders
+            self.helped_loading = True
+        return super().save(force_insert, force_update, using, update_fields)
 
-    def __str__(self):
-        return f"{self.loader.name} loaded for {self.delivery}"
+
 # ===================================================
 # MonthlyPayment Model
 # ===================================================
@@ -244,10 +229,9 @@ class PaymentPeriod(models.Model):
         end_str = self.period_end.strftime("%d %b %Y")
         return f"{start_str} to {end_str}"
 
-# # ===================================================
-# # PayrollManager Model
-# # ===================================================
-
+# ===================================================
+# PayrollManager Model
+# ===================================================
 class PayrollManager(models.Model):
     admin = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     """Stores payments per delivery per staff member"""
@@ -255,7 +239,7 @@ class PayrollManager(models.Model):
     delivery = models.ForeignKey(Delivery, on_delete=models.CASCADE)
     role_pay = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
-        help_text="Payment for the staff's primary role (driver, turnboy, etc.)"
+        help_text="Payment for the staff's primary role (turnboy, etc.)"
     )
     loader_pay = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,
@@ -275,29 +259,59 @@ class PayrollManager(models.Model):
     def __str__(self):
         return f"{self.staff.name} - {self.delivery} - Ksh {self.total_pay}"
 
-# # ===================================================
-# # Signal Handler(s)
-# # ===================================================
+# ===================================================
+# Signal Handler(s)
+# ===================================================
 @receiver(post_save, sender=Delivery)
 @receiver(post_delete, sender=Delivery)
 def update_payroll_manager(sender, instance, **kwargs):
     """
     Update payroll records when a delivery is saved or deleted.
-    This handles payments for all staff including those who helped with loading.
+    This handles all payroll scenarios according to business rules:
+    
+    1. Single turnboy, no helpers: Turnboy gets fixed rate + full loading amount
+    2. Two turnboys, both loading: Each gets fixed rate + equal split of loading
+    3. Two turnboys, only one loads: Loading turnboy gets fixed + full loading, other only fixed
+    4. Turnboy + other loaders: Loading amount split equally among all loading helpers
     """
     # If a Delivery is deleted, clean up related records
     if kwargs.get('signal') == post_delete:
         PayrollManager.objects.filter(delivery=instance).delete()
         return
 
-    # Calculate per-loader payment amount
-    per_loader_amount = instance.per_loader_amount()
+    # Get all staff who helped with loading
+    loading_staff = instance.get_loaders()
+    loading_count = len(loading_staff)
     
-    # Process all staff assignments (drivers and turnboys)
+    # Get all turnboys for this delivery
+    turnboy_assignments = instance.staffassignment_set.filter(role='turnboy')
+    
+    # Process driver (no payment for loading)
+    if instance.driver:
+        PayrollManager.objects.update_or_create(
+            staff=instance.driver,
+            delivery=instance,
+            defaults={
+                'role_pay': Decimal('0.00'),  # Drivers typically paid differently
+                'loader_pay': Decimal('0.00'),
+                'total_pay': Decimal('0.00'),
+            }
+        )
+    
+    # Process all staff assignments based on the four scenarios
     for assignment in instance.staffassignment_set.all():
+        # Base role pay (always paid)
         role_pay = instance.turnboy_payment_rate if assignment.role == 'turnboy' else Decimal('0.00')
-        loader_pay = per_loader_amount if assignment.helped_loading else Decimal('0.00')
         
+        # Calculate loader pay based on whether they helped loading
+        loader_pay = Decimal('0.00')
+        
+        if assignment.helped_loading and loading_count > 0:
+            # Staff helped with loading, calculate their share
+            per_loader = instance.loading_amount / Decimal(loading_count)
+            loader_pay = per_loader
+        
+        # Update or create the payroll record
         PayrollManager.objects.update_or_create(
             staff=assignment.staff,
             delivery=instance,
@@ -307,20 +321,6 @@ def update_payroll_manager(sender, instance, **kwargs):
                 'total_pay': role_pay + loader_pay,
             }
         )
-    
-    # Process all loader assignments
-    for assignment in instance.loaderassignment_set.all():
-        # Only process if the loader actually helped with loading
-        if assignment.helped_loading:
-            PayrollManager.objects.update_or_create(
-                staff=assignment.loader,
-                delivery=instance,
-                defaults={
-                    'role_pay': Decimal('0.00'),  # Dedicated loaders don't get role pay
-                    'loader_pay': per_loader_amount,
-                    'total_pay': per_loader_amount,
-                }
-            )
 
 
 @receiver(post_save, sender=StaffAssignment)
@@ -333,17 +333,4 @@ def update_payroll_on_staff_assignment_change(sender, instance, **kwargs):
     delivery = instance.delivery
     
     # We'll use the delivery signal handler to recalculate everything
-    update_payroll_manager(Delivery, delivery, raw=False)
-
-
-@receiver(post_save, sender=LoaderAssignment)
-@receiver(post_delete, sender=LoaderAssignment)
-def update_payroll_on_loader_assignment_change(sender, instance, **kwargs):
-    """
-    When loader assignments change (add/remove), recalculate all payroll records
-    for this delivery to ensure per_loader amounts are correct.
-    """
-    delivery = instance.delivery
-    
-    # We'll use the delivery signal handler to recalculate everything
-    update_payroll_manager(Delivery, delivery, raw=False)
+    update_payroll_manager(Delivery, delivery)

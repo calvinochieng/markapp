@@ -11,6 +11,7 @@ from decimal import Decimal
 from django.contrib import messages
 from django.utils import timezone
 import calendar
+from collections import defaultdict
 
 from datetime import datetime, timedelta
 from django.core.paginator import Paginator
@@ -61,29 +62,45 @@ def logout_view(request):
 # //////End of Auth Views///////
 
 # /////Dashboard View//////
+
 @login_required
 def dashboard(request):
     """
     Enhanced dashboard view showing comprehensive staff payment information
-    with filtering options for year/month selection
+    with filtering options for custom date ranges rather than just month/year
     """
-    # Get selected year and month (defaulting to current if not specified)
-    selected_year = int(request.GET.get('year', timezone.now().year))
-    selected_month = int(request.GET.get('month', timezone.now().month))
+    # Get today's date
+    today = timezone.now().date()
     
-    # Create date range for the selected month
-    start_date = timezone.datetime(selected_year, selected_month, 1).date()
-    _, last_day = calendar.monthrange(selected_year, selected_month)
-    end_date = timezone.datetime(selected_year, selected_month, last_day).date()
+    # Default date range: last 30 days if no dates are specified
+    default_end_date = today
+    default_start_date = today - timezone.timedelta(days=30)
+    
+    # Get selected date range from request parameters
+    try:
+        start_date = request.GET.get('start_date')
+        start_date = timezone.datetime.strptime(start_date, '%Y-%m-%d').date() if start_date else default_start_date
+        
+        end_date = request.GET.get('end_date')
+        end_date = timezone.datetime.strptime(end_date, '%Y-%m-%d').date() if end_date else default_end_date
+        
+        # Ensure end_date is not before start_date
+        if end_date < start_date:
+            end_date = start_date
+    except (ValueError, TypeError):
+        # If any errors in parsing dates, use defaults
+        start_date = default_start_date
+        end_date = default_end_date
+    
+    # Create date range tuple
     date_range = (start_date, end_date)
     
-    # Deliveries for the selected month - using select_related for optimization
+    # Deliveries for the selected period - using select_related for optimization
     deliveries = (Delivery.objects
                  .filter(date__range=date_range)
                  .select_related('vehicle', 'driver')
                  .prefetch_related(
-                     'staffassignment_set__staff',
-                     'loaderassignment_set__loader'
+                     'staffassignment_set__staff'
                  )
                  .order_by('-date', '-time'))
     
@@ -130,7 +147,7 @@ def dashboard(request):
                    )
                    .order_by('-delivery_count')[:5])
     
-    # Top performing turnboys - now uses StaffAssignment model
+    # Top performing turnboys - using StaffAssignment model
     top_turnboys = (Staff.objects
                     .filter(role='turnboy')
                     .annotate(
@@ -144,30 +161,34 @@ def dashboard(request):
                     )
                     .order_by('-delivery_count')[:5])
     
-    # Calculate payment statistics from PayrollManager
+    # Calculate payment statistics from PayrollManager for non-driver roles
     payroll_stats = PayrollManager.objects.filter(
-        delivery__date__range=date_range
+        delivery__date__range=date_range,
+        staff__role__in=['turnboy', 'loader']  # Only include non-driver roles
     ).aggregate(
         total_role_pay=Sum('role_pay'),
         total_loader_pay=Sum('loader_pay'),
         total_pay=Sum('total_pay')
     )
     
-    # Payment statistics by role
-    driver_payments = PayrollManager.objects.filter(
-        delivery__date__range=date_range,
-        staff__role='driver'
-    ).aggregate(total=Sum('total_pay'))['total'] or 0
-    
+    # Payment statistics by role (excluding drivers)
     turnboy_payments = PayrollManager.objects.filter(
         delivery__date__range=date_range,
         staff__role='turnboy'
-    ).aggregate(total=Sum('role_pay'))['total'] or 0
+    ).aggregate(
+        role_pay=Sum('role_pay'),
+        loader_pay=Sum('loader_pay'),
+        total=Sum('total_pay')
+    )
     
     loader_payments = PayrollManager.objects.filter(
         delivery__date__range=date_range,
         staff__role='loader'
-    ).aggregate(total=Sum('total_pay'))['total'] or 0
+    ).aggregate(
+        role_pay=Sum('role_pay'),
+        loader_pay=Sum('loader_pay'),
+        total=Sum('total_pay')
+    )
     
     # Calculate total loading amount
     total_loading_amount = delivery_stats['total_loading'] or 0
@@ -175,42 +196,81 @@ def dashboard(request):
     # Calculate total payments by role
     total_role_payments = payroll_stats['total_role_pay'] or 0
     total_loader_payments = payroll_stats['total_loader_pay'] or 0
+    total_turnboy_payments = turnboy_payments['total'] or 0
     
-    # Calculate total deliveries amount (including all payments)
+    # Calculate total deliveries amount
     total_deliveries_amount = total_loading_amount
     
     # Recently completed deliveries
     recent_deliveries = deliveries.filter(status='completed')[:5]
     
-    # Payments summary
-    monthly_payments = MonthlyPayment.objects.filter(
-        year=selected_year,
-        month=selected_month
+    # Payments from PaymentPeriod model that overlap with the selected date range
+    period_payments = PaymentPeriod.objects.filter(
+        Q(period_start__range=date_range) | 
+        Q(period_end__range=date_range) |
+        Q(period_start__lte=start_date, period_end__gte=end_date),
+        staff__role__in=['turnboy', 'loader']  # Only non-driver roles
     ).aggregate(
         paid_amount=Sum('total_payment', filter=Q(is_paid=True)),
         unpaid_amount=Sum('total_payment', filter=Q(is_paid=False)),
         total_amount=Sum('total_payment')
     )
     
-    # Staff with loading activity - staff who helped with loading for deliveries in this period
-    loading_helpers = (StaffAssignment.objects
-                      .filter(
-                          delivery__date__range=date_range,
-                          helped_loading=True
-                      )
-                      .values('staff__name')
-                      .annotate(
-                          loading_count=Count('id'),
-                          loading_earnings=Sum('delivery__loading_amount') / F('delivery__staffassignment__helped_loading')
-                      )
-                      .order_by('-loading_count')[:5])
-    
-    # Create list of years and months for filter dropdown
-    current_year = timezone.now().year
-    years = range(current_year - 2, current_year + 1)  # Current year and 2 years back
-    months = [(i, calendar.month_name[i]) for i in range(1, 13)]
+    # /////
+
+
+    # ... inside your dashboard view ...
+
+    # 1. Fetch relevant Staff Assignments (instead of aggregating directly)
+    helper_assignments = StaffAssignment.objects.filter(
+        delivery__date__range=date_range,
+        helped_loading=True
+    ).select_related('staff', 'delivery') # Crucial to fetch related data efficiently
+
+    # 2. Process in Python to calculate earnings per staff member
+    loading_earnings_by_staff = defaultdict(lambda: {'loading_count': 0, 'loading_earnings': Decimal(0)})
+
+    for assignment in helper_assignments:
+        staff_name = assignment.staff.name
+        # Call the model method here in Python
+        earnings = assignment.delivery.per_loader_amount()
+
+        loading_earnings_by_staff[staff_name]['loading_count'] += 1
+        loading_earnings_by_staff[staff_name]['loading_earnings'] += earnings
+
+    # 3. Convert to list and sort to get top helpers
+    loading_helpers_list = [
+        {'staff__name': name, **data}
+        for name, data in loading_earnings_by_staff.items()
+    ]
+
+    # Sort by count first (desc), then maybe earnings (desc) as a tie-breaker
+    loading_helpers_list.sort(key=lambda x: (x['loading_count'], x['loading_earnings']), reverse=True)
+
+    # 4. Get the top 5 for the context
+    loading_helpers = loading_helpers_list[:5]
+
+    # ... rest of your view, update context with this 'loading_helpers' ...
+    # Make sure the template ('dashboard/dashboard.html') is updated to expect
+    # 'staff__name', 'loading_count', and 'loading_earnings' keys for each item
+    # in the 'loading_helpers' list.
+
+    # Example context update:
+    context = {
+        # ... other context variables ...
+        'loading_helpers': loading_helpers,
+        # ...
+    }
+
+
+    # /////
     
     context = {
+        # Date range information
+        'start_date': start_date,
+        'end_date': end_date,
+        'date_range': f"{start_date.strftime('%d %b %Y')} - {end_date.strftime('%d %b %Y')}",
+        
         # Deliveries information
         'deliveries': deliveries[:10],  # Limit to 10 most recent for dashboard
         'total_deliveries': delivery_stats['delivery_count'] or 0,
@@ -237,31 +297,32 @@ def dashboard(request):
         # Delivery destinations
         'top_destinations': top_destinations,
         
-        # Payment information
+        # Payment information (excluding drivers)
         'total_deliveries_amount': total_deliveries_amount,
         'total_loading_amount': total_loading_amount,
         'total_role_payments': total_role_payments,
         'total_loader_payments': total_loader_payments,
-        'driver_payments': driver_payments,
-        'turnboy_payments': turnboy_payments,
-        'loader_payments': loader_payments,
+        'total_turnboy_payments': total_turnboy_payments,
+        'turnboy_payments': {
+            'role': turnboy_payments['role_pay'] or 0,
+            'loader': turnboy_payments['loader_pay'] or 0,
+            'total': turnboy_payments['total'] or 0
+        },
+        'loader_payments': {
+            'role': loader_payments['role_pay'] or 0,
+            'loader': loader_payments['loader_pay'] or 0,
+            'total': loader_payments['total'] or 0
+        },
         'total_pay': payroll_stats['total_pay'] or 0,
         
-        # Monthly payment stats
-        'monthly_paid': monthly_payments['paid_amount'] or 0,
-        'monthly_unpaid': monthly_payments['unpaid_amount'] or 0,
-        'monthly_total': monthly_payments['total_amount'] or 0,
-        
-        # Date information for filtering
-        'selected_month': selected_month,
-        'selected_month_name': calendar.month_name[selected_month],
-        'selected_year': selected_year,
-        'years': years,
-        'months': months,
-        'date_range': f"{start_date.strftime('%b %d')} - {end_date.strftime('%b %d, %Y')}"
+        # Period payment stats (excluding drivers)
+        'period_paid': period_payments['paid_amount'] or 0,
+        'period_unpaid': period_payments['unpaid_amount'] or 0,
+        'period_total': period_payments['total_amount'] or 0,
     }
     
     return render(request, 'dashboard/dashboard.html', context)
+
 
 # //////End of Dashboard View//////
 

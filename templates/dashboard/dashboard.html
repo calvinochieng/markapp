@@ -165,35 +165,23 @@
     <div class="hero-body">
       <h1 class="title is-1 has-text-centered mb-5">Delivery Management Dashboard</h1>
       
-      <!-- Date Filter -->
+      <!-- Date Range Filter -->
       <div class="filter-container box mb-5">
-        <h3 class="title is-5 mb-3">Data for: {{ selected_month_name }} {{ selected_year }} ({{ date_range }})</h3>
+        <h3 class="title is-5 mb-3">Data for: {{ date_range }}</h3>
         <form method="get" class="columns is-vcentered is-mobile-stacked">
-          <div class="column is-3">
+          <div class="column is-4">
             <div class="field">
-              <label class="label">Year</label>
+              <label class="label">Start Date</label>
               <div class="control">
-                <div class="select is-fullwidth is-rounded">
-                  <select name="year" id="year-select">
-                    {% for year in years %}
-                      <option value="{{ year }}" {% if year == selected_year %}selected{% endif %}>{{ year }}</option>
-                    {% endfor %}
-                  </select>
-                </div>
+                <input type="date" name="start_date" class="input is-rounded" value="{{ start_date|date:'Y-m-d' }}">
               </div>
             </div>
           </div>
-          <div class="column is-3">
+          <div class="column is-4">
             <div class="field">
-              <label class="label">Month</label>
+              <label class="label">End Date</label>
               <div class="control">
-                <div class="select is-fullwidth is-rounded">
-                  <select name="month" id="month-select">
-                    {% for month_num, month_name in months %}
-                      <option value="{{ month_num }}" {% if month_num == selected_month %}selected{% endif %}>{{ month_name }}</option>
-                    {% endfor %}
-                  </select>
-                </div>
+                <input type="date" name="end_date" class="input is-rounded" value="{{ end_date|date:'Y-m-d' }}">
               </div>
             </div>
           </div>
@@ -222,6 +210,7 @@
             <div class="tags">
               <span class="tag is-light is-success is-normal">{{ completed_deliveries }} Completed</span>
               <span class="tag is-light is-warning is-normal">{{ pending_deliveries }} Pending</span>
+              <span class="tag is-light is-info is-normal">{{ in_progress_deliveries }} In Progress</span>
             </div>
             <button class="button mt-4 is-primary is-rounded action-button is-fullwidth" 
                     onclick="window.location.href='/admin/app/delivery/add/'">
@@ -253,10 +242,11 @@
             <div class="mb-4">
               <p class="has-text-grey">Loading: {{ total_loading_amount|floatformat:2 }}/=</p>
               <p class="has-text-grey">Turnboy: {{ total_turnboy_payments|floatformat:2 }}/=</p>
+              <p class="has-text-grey">Loader: {{ total_loader_payments|floatformat:2 }}/=</p>
             </div>
             <button class="button is-link is-rounded action-button is-fullwidth"
-                    onclick="window.location.href='/admin/app/monthlypayment/'">
-              <i class="fas fa-file-invoice-dollar mr-2"></i>Validate Payrolls
+                    onclick="window.location.href='/admin/app/paymentperiod/'">
+              <i class="fas fa-file-invoice-dollar mr-2"></i>Manage Payments
             </button>
           </div>
         </div>
@@ -360,6 +350,115 @@
         </div>
       </div>
       
+      <!-- Added Section: Top Turnboys and Loading Helpers -->
+      <div class="columns mb-5">
+        <!-- Top Turnboys -->
+        <div class="column is-6">
+          <div class="box">
+            <h3 class="title is-4 mb-3">
+              <span class="icon has-text-success"><i class="fas fa-user-friends"></i></span>
+              <span>Top Turnboys</span>
+            </h3>
+            <div class="table-container">
+              <table class="table is-fullwidth is-hoverable">
+                <thead>
+                  <tr>
+                    <th>Turnboy</th>
+                    <th>Deliveries</th>
+                    <th>% of Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for turnboy in top_turnboys %}
+                  <tr>
+                    <td>{{ turnboy.name }}</td>
+                    <td>{{ turnboy.delivery_count }}</td>
+                    <td>
+                      {% if total_deliveries > 0 %}
+                        {% widthratio turnboy.delivery_count total_deliveries 100 %}%
+                      {% else %}
+                        0%
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% empty %}
+                  <tr>
+                    <td colspan="3" class="has-text-centered">No turnboy data available</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Loading Helpers -->
+        <div class="column is-6">
+          <div class="box">
+            <h3 class="title is-4 mb-3">
+              <span class="icon has-text-warning"><i class="fas fa-people-carry"></i></span>
+              <span>Loading Helpers</span>
+            </h3>
+            <div class="table-container">
+              <table class="table is-fullwidth is-hoverable">
+                <thead>
+                  <tr>
+                    <th>Staff Name</th>
+                    <th>Loading Count</th>
+                    <th>Earnings (Ksh)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for helper in loading_helpers %}
+                  <tr>
+                    <td>{{ helper.staff__name }}</td>
+                    <td>{{ helper.loading_count }}</td>
+                    <td>{{ helper.loading_earnings|floatformat:2 }}</td>
+                  </tr>
+                  {% empty %}
+                  <tr>
+                    <td colspan="3" class="has-text-centered">No loading helpers data available</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Payment Status Section -->
+      <div class="columns mb-5">
+        <div class="column is-12">
+          <div class="box">
+            <h3 class="title is-4 mb-3">
+              <span class="icon has-text-danger"><i class="fas fa-money-bill-wave"></i></span>
+              <span>Payment Status</span>
+            </h3>
+            <div class="columns">
+              <div class="column is-4">
+                <div class="notification is-success">
+                  <p class="title is-5">Paid</p>
+                  <p class="stat-medium">Ksh {{ period_paid|floatformat:2 }}</p>
+                </div>
+              </div>
+              <div class="column is-4">
+                <div class="notification is-warning">
+                  <p class="title is-5">Unpaid</p>
+                  <p class="stat-medium">Ksh {{ period_unpaid|floatformat:2 }}</p>
+                </div>
+              </div>
+              <div class="column is-4">
+                <div class="notification is-info">
+                  <p class="title is-5">Total</p>
+                  <p class="stat-medium">Ksh {{ period_total|floatformat:2 }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
       <!-- Recent Deliveries Section -->   
       <div class="mt-5">
         <h2 class="title is-4 mb-4">
@@ -374,7 +473,6 @@
                   <th>Date</th>
                   <th>Vehicle</th>
                   <th>Driver</th>
-                  <th>Turnboy</th>
                   <th>Location</th>
                   <th>Loading Amt</th>
                   <th>Status</th>
@@ -382,12 +480,11 @@
                 </tr>
               </thead>
               <tbody>
-                {% for delivery in deliveries %}
+                {% for delivery in recent_deliveries %}
                   <tr>
                     <td>{{ delivery.date }}</td>
                     <td>{{ delivery.vehicle.plate_number }}</td>
                     <td>{{ delivery.driver.name }}</td>
-                    <td>{{ delivery.turnboy.name }}</td>
                     <td>{{ delivery.destination }}</td>
                     <td>Ksh {{ delivery.loading_amount|floatformat:2 }}/=</td>
                     <td>
@@ -412,7 +509,7 @@
                   </tr>
                 {% empty %}
                   <tr>
-                    <td colspan="8" class="has-text-centered">No deliveries found for this period</td>
+                    <td colspan="7" class="has-text-centered">No deliveries found for this period</td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -431,21 +528,9 @@
     </div>
   </section>
 
-  <!-- Add JavaScript for interactive filtering and charts -->
+  <!-- Add JavaScript for interactive filtering -->
   <script>
     document.addEventListener('DOMContentLoaded', function() {
-      // Make the year and month selection auto-submit the form
-      const yearSelect = document.getElementById('year-select');
-      const monthSelect = document.getElementById('month-select');
-      
-      yearSelect.addEventListener('change', function() {
-        this.form.submit();
-      });
-      
-      monthSelect.addEventListener('change', function() {
-        this.form.submit();
-      });
-      
       // Add responsive behavior for tables on small screens
       const tables = document.querySelectorAll('.table-container');
       
