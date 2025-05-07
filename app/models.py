@@ -7,13 +7,14 @@ from django.contrib.auth.models import User
 from decimal import Decimal
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
+from django.core.exceptions import ValidationError
 
 # ===================================================
 # Staff Model
 # ===================================================
 class Staff(models.Model):
     admin = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
-    """Staff model to represent drivers, turnboys, and loaders"""
+    """Staff model to represent turnboys and loaders"""
     ROLE_CHOICES = [
         ('turnboy', 'Turnboy'),
         ('loader', 'Loader'),
@@ -21,13 +22,20 @@ class Staff(models.Model):
     
     name = models.CharField(max_length=100)
     phone_number = models.CharField(max_length=15, blank=True, null=True)
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, db_index=True)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, db_index=True, default='turnboy')
     is_loader = models.BooleanField(default=False, help_text="Check if this person can also work as a loader")
     date_joined = models.DateField(default=timezone.now)
     is_active = models.BooleanField(default=True, db_index=True)
     
     def __str__(self):
         return f"{self.name} ({self.get_role_display()})"
+    
+    def clean(self):
+        # Ensure loader role always has is_loader=True
+        if self.role == 'loader' and not self.is_loader:
+            self.is_loader = True
+        super().clean()
+        
     def get_monthly_payment(self, year, month):
         """
         Calculate total payment for this staff member for a specific month
@@ -71,6 +79,7 @@ class Vehicle(models.Model):
         ('bus', 'Bus'),
         ('other', 'Other'),
     ]
+    # Keep driver as a string field, not related to Staff model
     driver = models.CharField(max_length=100, blank=True, null=True)
     plate_number = models.CharField(max_length=20, unique=True)
     vehicle_type = models.CharField(max_length=50, choices=VEHICLE_TYPE_CHOICES, blank=True)
@@ -78,7 +87,8 @@ class Vehicle(models.Model):
     is_active = models.BooleanField(default=True, db_index=True)  # Added index for performance
     
     def __str__(self):
-        return f"{self.plate_number} ({self.get_vehicle_type_display()}) - {self.capacity}"
+        driver_display = f" - Driver: {self.driver}" if self.driver else ""
+        return f"{self.plate_number} ({self.get_vehicle_type_display()}) - {self.capacity}{driver_display}"
 
 
 # ===================================================
@@ -109,13 +119,14 @@ class Delivery(models.Model):
         help_text="Total amount paid for loading"
     )
     notes = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed')
 
     class Meta:
         verbose_name_plural = "Deliveries"
         ordering = ['-date']
 
     def __str__(self):
-        driver_name = self.vehicle.driver if self.vehicle else "No driver"
+        driver_name = self.vehicle.driver if self.vehicle and self.vehicle.driver else "No driver"
         turnboys = ", ".join([assign.staff.name for assign in self.staffassignment_set.filter(role='turnboy')])
         turnboys_str = f" (Turnboys: {turnboys})" if turnboys else ""
         
@@ -123,7 +134,10 @@ class Delivery(models.Model):
 
     def get_loaders(self):
         """Return a list of all staff who helped with loading for this delivery"""
-        return [assignment.staff for assignment in self.staffassignment_set.filter(helped_loading=True)]
+        return Staff.objects.filter(
+            staffassignment__delivery=self,
+            staffassignment__helped_loading=True
+        ).distinct()
 
     def total_loader_count(self):
         """Count the total number of people who helped with loading"""
@@ -146,17 +160,13 @@ class Delivery(models.Model):
 # ===================================================
 class StaffAssignment(models.Model):
     """Model to track which staff worked on which deliveries and in what capacity"""
-    ROLE_CHOICES = [
-        ('turnboy', 'Turnboy'),
-        ('loader', 'Loader'),
-    ]
     delivery = models.ForeignKey(Delivery, on_delete=models.CASCADE)
     staff = models.ForeignKey(
         Staff,
         on_delete=models.CASCADE,
         limit_choices_to={'role__in': ['turnboy', 'loader']},  # Only include these
     )
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    role = models.CharField(max_length=20, choices=Staff.ROLE_CHOICES)  # Use Staff model choices
     helped_loading = models.BooleanField(
         default=False, 
         help_text="Set to True if this staff member helped with loading"
@@ -168,10 +178,19 @@ class StaffAssignment(models.Model):
     def __str__(self):
         return f"{self.staff.name} as {self.get_role_display()} for {self.delivery}"
     
-    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+    def clean(self):
+        # Ensure staff member's role matches their assigned role
+        if self.staff.role != self.role:
+            raise ValidationError(f"Staff member {self.staff.name} is a {self.staff.get_role_display()}, not a {self.get_role_display()}")
+        
+        # Ensure loaders always have helped_loading set to True
         if self.role == 'loader':
-            # Make sure the helped_loading field is set to True for loaders
             self.helped_loading = True
+        
+        super().clean()
+    
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        self.clean()
         return super().save(force_insert, force_update, using, update_fields)
 
 
@@ -197,6 +216,11 @@ class MonthlyPayment(models.Model):
     def __str__(self):
         month_name = calendar.month_name[self.month]
         return f"{self.staff.name} - {month_name} {self.year}"
+    
+    def save(self, *args, **kwargs):
+        # Always ensure total_payment is the sum of role_payment and loader_payment
+        self.total_payment = self.role_payment + self.loader_payment
+        super().save(*args, **kwargs)
 
 class PaymentPeriod(models.Model):
     admin = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
@@ -228,6 +252,11 @@ class PaymentPeriod(models.Model):
         start_str = self.period_start.strftime("%d %b %Y")
         end_str = self.period_end.strftime("%d %b %Y")
         return f"{start_str} to {end_str}"
+    
+    def save(self, *args, **kwargs):
+        # Always ensure total_payment is the sum of role_payment and loader_payment
+        self.total_payment = self.role_payment + self.loader_payment
+        super().save(*args, **kwargs)
 
 # ===================================================
 # PayrollManager Model
@@ -286,18 +315,6 @@ def update_payroll_manager(sender, instance, **kwargs):
     # Get all turnboys for this delivery
     turnboy_assignments = instance.staffassignment_set.filter(role='turnboy')
     
-    # Process driver (no payment for loading)
-    if instance.driver:
-        PayrollManager.objects.update_or_create(
-            staff=instance.driver,
-            delivery=instance,
-            defaults={
-                'role_pay': Decimal('0.00'),  # Drivers typically paid differently
-                'loader_pay': Decimal('0.00'),
-                'total_pay': Decimal('0.00'),
-            }
-        )
-    
     # Process all staff assignments based on the four scenarios
     for assignment in instance.staffassignment_set.all():
         # Base role pay (always paid)
@@ -330,7 +347,8 @@ def update_payroll_on_staff_assignment_change(sender, instance, **kwargs):
     When staff assignments change (add/remove), recalculate all payroll records
     for this delivery to ensure per_loader amounts are correct.
     """
-    delivery = instance.delivery
-    
-    # We'll use the delivery signal handler to recalculate everything
-    update_payroll_manager(Delivery, delivery)
+    if hasattr(instance, 'delivery'):
+        delivery = instance.delivery
+        
+        # We'll use the delivery signal handler to recalculate everything
+        update_payroll_manager(Delivery, delivery)

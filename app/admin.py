@@ -1,14 +1,19 @@
 from django.contrib import admin
 from django.urls import path
 from django.shortcuts import render, redirect
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django import forms
 from django.contrib import messages
-from django.db.models import Sum, Count, Q, F
+from django.db.models import Sum, Count, Q, F, Value, DecimalField
+from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from decimal import Decimal
 import calendar
 import csv
+import json
+from datetime import timedelta
 from io import StringIO
 from .models import (
     Staff, Vehicle, Delivery, 
@@ -35,14 +40,25 @@ class StaffAssignmentInline(admin.TabularInline):
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
-# PayrollManager Admin
+# PayrollManager Admin with enhanced features
 @admin.register(PayrollManager)
 class PayrollManagerAdmin(admin.ModelAdmin):
     list_display = ('staff', 'delivery', 'role_pay', 'loader_pay', 'total_pay', 'date_recorded')
-    list_filter = ('staff__role', 'delivery__date')
-    search_fields = ('staff__name', 'delivery__destination')
+    list_filter = ('staff__role', 'delivery__date', 'staff__is_active')
+    search_fields = ('staff__name', 'delivery__destination', 'delivery__vehicle__plate_number')
     date_hierarchy = 'date_recorded'
     readonly_fields = ('total_pay', 'staff', 'delivery', 'date_recorded')
+    list_select_related = ('staff', 'delivery', 'delivery__vehicle')
+    
+    fieldsets = (
+        ('Payment Information', {
+            'fields': ('staff', 'delivery', 'role_pay', 'loader_pay', 'total_pay')
+        }),
+        ('Metadata', {
+            'fields': ('date_recorded',),
+            'classes': ('collapse',)
+        }),
+    )
     
     def has_add_permission(self, request):
         # Prevent direct creation as these are generated automatically
@@ -50,27 +66,35 @@ class PayrollManagerAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         # Order by most recent first
-        return super().get_queryset(request).order_by('-delivery__date', 'staff__name')
+        return super().get_queryset(request).select_related(
+            'staff', 'delivery', 'delivery__vehicle'
+        ).order_by('-delivery__date', 'staff__name')
     
     def has_delete_permission(self, request, obj=None):
         # Allow deletion for testing but warn in the template
         return True
+    
+    def save_model(self, request, obj, form, change):
+        obj.total_pay = obj.role_pay + obj.loader_pay
+        super().save_model(request, obj, form, change)
 
 
-# Delivery Admin
+# Delivery Admin with enhanced features
 @admin.register(Delivery)
 class DeliveryAdmin(admin.ModelAdmin):
-    list_display = ('date', 'vehicle', 'display_driver', 'display_turnboys', 
-                   'destination', 'loading_amount', 'loader_count', 'display_loading_payments', 'status')
-    list_filter = ('date', 'vehicle', 'status', 'driver')
-    search_fields = ('destination', 'items_carried')
+    list_display = ('delivery_date', 'vehicle_info', 'display_driver', 'display_turnboys', 
+                   'destination', 'loading_amount', 'loader_count', 'display_loading_payments')
+    list_filter = ('date', 'vehicle')
+    search_fields = ('destination', 'items_carried', 'vehicle__plate_number', 'vehicle__driver')
     date_hierarchy = 'date'
     inlines = [StaffAssignmentInline]
-    autocomplete_fields = ['vehicle', 'driver']
+    autocomplete_fields = ['vehicle']
     readonly_fields = ('display_payment_details',)
+    list_per_page = 20
+    
     fieldsets = (
         ('Delivery Information', {
-            'fields': ('date', 'time', 'vehicle', 'driver', 'destination', 'status')
+            'fields': ('date', 'vehicle', 'destination')
         }),
         ('Financial Information', {
             'fields': ('loading_amount', 'turnboy_payment_rate', 'display_payment_details')
@@ -80,22 +104,41 @@ class DeliveryAdmin(admin.ModelAdmin):
         }),
     )
     
+    def delivery_date(self, obj):
+        """Format date in a more readable format"""
+        return format_html(
+            '<span style="white-space:nowrap;">{}</span>', 
+            obj.date.strftime('%d %b %Y')
+        )
+    delivery_date.admin_order_field = 'date'
+    delivery_date.short_description = 'Date'
+    
+    def vehicle_info(self, obj):
+        return format_html(
+            '<span style="font-weight:bold;">{}</span><br><span style="color:#666;">{} - {}</span>',
+            obj.vehicle.plate_number,
+            obj.vehicle.get_vehicle_type_display(),
+            obj.vehicle.capacity
+        )
+    vehicle_info.short_description = 'Vehicle'
+    vehicle_info.admin_order_field = 'vehicle__plate_number'
+    
     def display_driver(self, obj):
-        return obj.driver.name if obj.driver else "No driver"
+        return obj.vehicle.driver or "No driver"
     display_driver.short_description = 'Driver'
     
     def display_turnboys(self, obj):
         turnboys = StaffAssignment.objects.filter(delivery=obj, role='turnboy')
         if not turnboys:
-            return "None"
+            return format_html('<span style="color:#999;">None</span>')
         
         # Show turnboy names and indicate if they're loading
         turnboy_info = []
         for t in turnboys:
-            loading_status = " (loading)" if t.helped_loading else ""
+            loading_status = ' <span style="color:green;">✓</span>' if t.helped_loading else ''
             turnboy_info.append(f"{t.staff.name}{loading_status}")
         
-        return ", ".join(turnboy_info)
+        return format_html(", ".join(turnboy_info))
     display_turnboys.short_description = 'Turnboys'
     
     def loader_count(self, obj):
@@ -109,12 +152,15 @@ class DeliveryAdmin(admin.ModelAdmin):
             
         loaders = obj.staffassignment_set.filter(helped_loading=True)
         if not loaders:
-            return "No loaders"
+            return format_html('<span style="color:#999;">No loaders</span>')
             
         loader_count = loaders.count()
         per_loader = obj.loading_amount / loader_count if loader_count > 0 else 0
         
-        return f"Ksh {per_loader:.2f} per loader ({loader_count} loaders)"
+        return format_html(
+            '<span style="white-space:nowrap;">Ksh {:.2f}</span> per loader ({})',
+            per_loader, loader_count
+        )
     display_loading_payments.short_description = 'Loading Payments'
     
     def display_payment_details(self, obj):
@@ -201,35 +247,110 @@ class DeliveryAdmin(admin.ModelAdmin):
         return mark_safe(html)
     display_payment_details.short_description = 'Payment Details'
     
+    # Custom actions
+    actions = ['export_to_csv', 'calculate_payments']
+    
+    def export_to_csv(self, request, queryset):
+        """Export selected deliveries to CSV"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="deliveries.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow([
+            'Date', 'Destination', 'Vehicle', 'Driver', 'Turnboys', 
+            'Loading Amount', 'Items Carried', 'Status'
+        ])
+        
+        for delivery in queryset:
+            turnboys = ", ".join([
+                t.staff.name for t in StaffAssignment.objects.filter(delivery=delivery, role='turnboy')
+            ])
+            
+            writer.writerow([
+                delivery.date,
+                delivery.destination,
+                delivery.vehicle.plate_number,
+                delivery.vehicle.driver or 'No driver',
+                turnboys,
+                delivery.loading_amount,
+                delivery.items_carried,
+                delivery.status
+            ])
+        
+        return response
+    export_to_csv.short_description = "Export selected deliveries to CSV"
+    
+    def calculate_payments(self, request, queryset):
+        """Force recalculation of payments for selected deliveries"""
+        from django.db.models.signals import post_save
+        from .models import update_payroll_manager
+        
+        count = 0
+        for delivery in queryset:
+            update_payroll_manager(Delivery, delivery)
+            count += 1
+        
+        messages.success(request, f"Recalculated payments for {count} deliveries")
+    calculate_payments.short_description = "Recalculate payments for selected deliveries"
+    
+    # Override to optimize queries
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('vehicle')
 
-# Staff Admin
+
+# Staff Admin with enhanced features
 @admin.register(Staff)
 class StaffAdmin(admin.ModelAdmin):
-    list_display = ('name', 'role', 'is_loader', 'is_active', 'phone_number', 'date_joined', 'display_payments_month')
-    list_filter = ('role', 'is_loader', 'is_active')
+    list_display = ('name', 'role', 'is_loader', 'is_active', 'phone_number', 'date_joined', 
+                   'display_payments_month', 'display_deliveries_count')
+    list_filter = ('role', 'is_loader', 'is_active', 'date_joined')
     search_fields = ('name', 'phone_number')
-    actions = ['calculate_monthly_payment', 'calculate_custom_period_payment', 'export_staff_payments_csv']
+    actions = ['calculate_monthly_payment', 'calculate_custom_period_payment', 
+              'export_staff_payments_csv', 'mark_as_inactive', 'mark_as_active']
+    
+    fieldsets = (
+        ('Staff Information', {
+            'fields': ('name', 'phone_number', 'role', 'is_loader')
+        }),
+        ('Status', {
+            'fields': ('is_active', 'date_joined'),
+        }),
+    )
     
     def get_queryset(self, request):
-        # Annotate with payment info for current month
+        # Annotate with payment info for current month and delivery count
         today = timezone.now().date()
         start_date = today.replace(day=1)
         _, last_day = calendar.monthrange(today.year, today.month)
         end_date = today.replace(day=last_day)
         
         return super().get_queryset(request).annotate(
-            current_month_pay=Sum(
+            current_month_pay=Coalesce(Sum(
                 'payrollmanager__total_pay',
                 filter=Q(payrollmanager__delivery__date__range=(start_date, end_date))
-            )
+            ), Value(0), output_field=DecimalField()),
+            deliveries_count=Count('staffassignment__delivery', distinct=True)
         )
     
     def display_payments_month(self, obj):
         # Display payments for current month
-        if hasattr(obj, 'current_month_pay') and obj.current_month_pay:
-            return f"Ksh {obj.current_month_pay:.2f}"
+        if hasattr(obj, 'current_month_pay'):
+            return format_html(
+                '<span style="white-space:nowrap;">Ksh {:.2f}</span>',
+                obj.current_month_pay
+            )
         return "Ksh 0.00"
     display_payments_month.short_description = f"Earnings ({timezone.now().strftime('%b %Y')})"
+    display_payments_month.admin_order_field = 'current_month_pay'
+    
+    def display_deliveries_count(self, obj):
+        """Display number of deliveries for this staff member"""
+        if hasattr(obj, 'deliveries_count'):
+            url = f"/admin/your_app/delivery/?staff={obj.id}"  # Adjust the URL to your app name
+            return format_html('<a href="{}">{}</a>', url, obj.deliveries_count)
+        return "0"
+    display_deliveries_count.short_description = "Deliveries"
+    display_deliveries_count.admin_order_field = 'deliveries_count'
     
     def calculate_monthly_payment(self, request, queryset):
         """Admin action to calculate monthly payments for selected staff"""
@@ -298,8 +419,8 @@ class StaffAdmin(admin.ModelAdmin):
                     )
                     
                     # Calculate totals
-                    role_payment = payroll_entries.aggregate(total=Sum('role_pay'))['total'] or Decimal('0.00')
-                    loader_payment = payroll_entries.aggregate(total=Sum('loader_pay'))['total'] or Decimal('0.00')
+                    role_payment = payroll_entries.aggregate(total=Coalesce(Sum('role_pay'), Value(0), output_field=DecimalField()))['total']
+                    loader_payment = payroll_entries.aggregate(total=Coalesce(Sum('loader_pay'), Value(0), output_field=DecimalField()))['total']
                     total_payment = role_payment + loader_payment
                     
                     # Create or update PaymentPeriod record
@@ -359,32 +480,245 @@ class StaffAdmin(admin.ModelAdmin):
         
         return response
     export_staff_payments_csv.short_description = "Export detailed payment history (CSV)"
+    
+    def mark_as_inactive(self, request, queryset):
+        """Mark selected staff as inactive"""
+        updated = queryset.update(is_active=False)
+        messages.success(request, f"Marked {updated} staff members as inactive")
+    mark_as_inactive.short_description = "Mark selected staff as inactive"
+    
+    def mark_as_active(self, request, queryset):
+        """Mark selected staff as active"""
+        updated = queryset.update(is_active=True)
+        messages.success(request, f"Marked {updated} staff members as active")
+    mark_as_active.short_description = "Mark selected staff as active"
+    
+    # Add chart view for staff earnings
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('staff-earnings-chart/', self.admin_site.admin_view(self.staff_earnings_chart_view), 
+                 name='staff-earnings-chart'),
+            path('staff-earnings-data/', self.admin_site.admin_view(self.staff_earnings_data), 
+                 name='staff-earnings-data'),
+        ]
+        return custom_urls + urls
+    
+    def staff_earnings_chart_view(self, request):
+        """View to display staff earnings chart"""
+        return render(request, 'admin/staff_earnings_chart.html', {'title': 'Staff Earnings Chart'})
+    
+    def staff_earnings_data(self, request):
+        """API endpoint to provide staff earnings data for charts"""
+        # Get the top 10 earning staff for the current month
+        today = timezone.now().date()
+        start_date = today.replace(day=1)
+        _, last_day = calendar.monthrange(today.year, today.month)
+        end_date = today.replace(day=last_day)
+        
+        top_staff = Staff.objects.filter(is_active=True).annotate(
+            earnings=Coalesce(Sum(
+                'payrollmanager__total_pay',
+                filter=Q(payrollmanager__delivery__date__range=(start_date, end_date))
+            ), Value(0), output_field=DecimalField())
+        ).order_by('-earnings')[:10]
+        
+        data = {
+            'labels': [staff.name for staff in top_staff],
+            'datasets': [{
+                'label': f'Earnings for {calendar.month_name[today.month]} {today.year}',
+                'data': [float(staff.earnings) for staff in top_staff],
+                'backgroundColor': 'rgba(54, 162, 235, 0.5)',
+                'borderColor': 'rgba(54, 162, 235, 1)',
+                'borderWidth': 1
+            }]
+        }
+        
+        return JsonResponse(data)
 
-# Vehicle Admin
+# Vehicle Admin with enhanced features
 @admin.register(Vehicle)
 class VehicleAdmin(admin.ModelAdmin):
-    list_display = ('plate_number', 'vehicle_type', 'capacity', 'is_active')
+    list_display = ('plate_number', 'driver', 'vehicle_type', 'capacity', 'is_active', 'display_deliveries_count')
     list_filter = ('vehicle_type', 'is_active')
-    search_fields = ('plate_number',)
+    search_fields = ('plate_number', 'driver')
+    actions = ['mark_as_inactive', 'mark_as_active', 'export_vehicle_deliveries']
+    
+    fieldsets = (
+        ('Vehicle Information', {
+            'fields': ('plate_number', 'driver', 'vehicle_type', 'capacity')
+        }),
+        ('Status', {
+            'fields': ('is_active',),
+        }),
+    )
+    
+    def get_queryset(self, request):
+        # Annotate with delivery count
+        return super().get_queryset(request).annotate(
+            deliveries_count=Count('delivery')
+        )
+    
+    def display_deliveries_count(self, obj):
+        """Display number of deliveries for this vehicle"""
+        if hasattr(obj, 'deliveries_count'):
+            url = f"/admin/your_app/delivery/?vehicle__id__exact={obj.id}"  # Adjust URL to your app name
+            return format_html('<a href="{}">{}</a>', url, obj.deliveries_count)
+        return "0"
+    display_deliveries_count.short_description = "Deliveries"
+    display_deliveries_count.admin_order_field = 'deliveries_count'
+    
+    def mark_as_active(self, request, queryset):
+            """Mark selected vehicles as active"""
+            updated = queryset.update(is_active=True)
+            messages.success(request, f"Marked {updated} vehicles as active")
+    mark_as_active.short_description = "Mark selected vehicles as active"
+    
+    def export_vehicle_deliveries(self, request, queryset):
+        """Export all deliveries for selected vehicles to CSV"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="vehicle_deliveries.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow([
+            'Vehicle', 'Driver', 'Date', 'Destination', 
+            'Turnboys', 'Loading Amount', 'Status'
+        ])
+        
+        for vehicle in queryset:
+            deliveries = Delivery.objects.filter(vehicle=vehicle).order_by('-date')
+            
+            for delivery in deliveries:
+                turnboys = ", ".join([
+                    t.staff.name for t in StaffAssignment.objects.filter(
+                        delivery=delivery, role='turnboy'
+                    )
+                ])
+                
+                writer.writerow([
+                    vehicle.plate_number,
+                    vehicle.driver or 'No driver',
+                    delivery.date,
+                    delivery.destination,
+                    turnboys,
+                    delivery.loading_amount,
+                    delivery.status
+                ])
+        
+        return response
+    export_vehicle_deliveries.short_description = "Export delivery history for selected vehicles"
+    
+    # Add vehicle statistics view
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('vehicle-stats/', self.admin_site.admin_view(self.vehicle_stats_view), 
+                name='vehicle-stats'),
+            path('vehicle-stats-data/', self.admin_site.admin_view(self.vehicle_stats_data), 
+                name='vehicle-stats-data'),
+        ]
+        return custom_urls + urls
+    
+    def vehicle_stats_view(self, request):
+        """View to display vehicle statistics"""
+        return render(request, 'admin/vehicle_stats.html', {'title': 'Vehicle Statistics'})
+    
+    def vehicle_stats_data(self, request):
+        """API endpoint to provide vehicle statistics data for charts"""
+        # Get the top 10 vehicles by delivery count
+        today = timezone.now().date()
+        thirty_days_ago = today - timedelta(days=30)
+        
+        top_vehicles = Vehicle.objects.filter(is_active=True).annotate(
+            total_deliveries=Count('delivery'),
+            recent_deliveries=Count('delivery', filter=Q(delivery__date__gte=thirty_days_ago))
+        ).order_by('-total_deliveries')[:10]
+        
+        data = {
+            'labels': [vehicle.plate_number for vehicle in top_vehicles],
+            'datasets': [
+                {
+                    'label': 'Total Deliveries',
+                    'data': [vehicle.total_deliveries for vehicle in top_vehicles],
+                    'backgroundColor': 'rgba(54, 162, 235, 0.5)',
+                },
+                {
+                    'label': 'Last 30 Days',
+                    'data': [vehicle.recent_deliveries for vehicle in top_vehicles],
+                    'backgroundColor': 'rgba(255, 99, 132, 0.5)',
+                }
+            ]
+        }
+        
+        return JsonResponse(data)
+
 
 # Monthly Payment Admin
 @admin.register(MonthlyPayment)
 class MonthlyPaymentAdmin(admin.ModelAdmin):
-    list_display = ('staff', 'get_month_year', 'role_payment', 'loader_payment', 'total_payment', 'is_paid', 'payment_date')
-    list_filter = ('year', 'month', 'is_paid', 'staff__role')
+    list_display = ('staff_name', 'month_year', 'role_payment', 'loader_payment', 
+                'total_payment', 'payment_status', 'payment_date')
+    list_filter = ('is_paid', 'month', 'year', 'staff__role')
     search_fields = ('staff__name',)
-    actions = ['export_csv', 'mark_as_paid']
     date_hierarchy = 'payment_date'
+    actions = ['mark_as_paid', 'mark_as_unpaid', 'export_to_csv']
     
-    def get_month_year(self, obj):
-        return f"{calendar.month_name[obj.month]} {obj.year}"
-    get_month_year.short_description = "Month/Year"
+    fieldsets = (
+        ('Payment Information', {
+            'fields': ('staff', 'year', 'month', 'role_payment', 'loader_payment', 'total_payment')
+        }),
+        ('Payment Status', {
+            'fields': ('is_paid', 'payment_date')
+        }),
+    )
     
-    def export_csv(self, request, queryset):
-        """Export selected payments as CSV"""
-        output = StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['Staff Name', 'Role', 'Month', 'Year', 'Role Payment', 'Loader Payment', 'Total Payment', 'Is Paid', 'Payment Date'])
+    readonly_fields = ('total_payment',)
+    
+    def staff_name(self, obj):
+        return obj.staff.name
+    staff_name.admin_order_field = 'staff__name'
+    staff_name.short_description = 'Staff'
+    
+    def month_year(self, obj):
+        return format_html(
+            '<span style="white-space:nowrap;">{} {}</span>',
+            calendar.month_name[obj.month], obj.year
+        )
+    month_year.short_description = 'Month/Year'
+    
+    def payment_status(self, obj):
+        if obj.is_paid:
+            return format_html(
+                '<span style="color:green;">✓ Paid</span> on {}'.format(
+                    obj.payment_date.strftime('%d %b %Y') if obj.payment_date else 'Unknown date'
+                )
+            )
+        else:
+            return format_html('<span style="color:red;">Unpaid</span>')
+    payment_status.short_description = 'Status'
+    
+    def mark_as_paid(self, request, queryset):
+        """Mark selected payments as paid"""
+        queryset.update(is_paid=True, payment_date=timezone.now().date())
+        messages.success(request, f"Marked {queryset.count()} payments as paid")
+    mark_as_paid.short_description = "Mark selected payments as paid"
+    
+    def mark_as_unpaid(self, request, queryset):
+        """Mark selected payments as unpaid"""
+        queryset.update(is_paid=False, payment_date=None)
+        messages.success(request, f"Marked {queryset.count()} payments as unpaid")
+    mark_as_unpaid.short_description = "Mark selected payments as unpaid"
+    
+    def export_to_csv(self, request, queryset):
+        """Export selected payments to CSV"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="monthly_payments.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow([
+            'Staff Name', 'Role', 'Month', 'Year', 'Role Payment', 
+            'Loader Payment', 'Total Payment', 'Payment Status', 'Payment Date'
+        ])
         
         for payment in queryset:
             writer.writerow([
@@ -395,91 +729,77 @@ class MonthlyPaymentAdmin(admin.ModelAdmin):
                 payment.role_payment,
                 payment.loader_payment,
                 payment.total_payment,
-                'Yes' if payment.is_paid else 'No',
-                payment.payment_date if payment.payment_date else ''
+                'Paid' if payment.is_paid else 'Unpaid',
+                payment.payment_date or 'N/A'
             ])
         
-        response = HttpResponse(output.getvalue(), content_type='text/csv')
-        response['Content-Disposition'] = 'attachment; filename=monthly_payments.csv'
         return response
-    export_csv.short_description = "Export selected payments to CSV"
-    
-    def mark_as_paid(self, request, queryset):
-        """Mark selected payments as paid"""
-        queryset.update(is_paid=True, payment_date=timezone.now().date())
-        messages.success(request, f"{queryset.count()} payments marked as paid")
-    mark_as_paid.short_description = "Mark selected payments as paid"
-    
-    def get_urls(self):
-        urls = super().get_urls()
-        custom_urls = [
-            path('payment-summary/', self.admin_site.admin_view(self.payment_summary_view), name='payment-summary'),
-        ]
-        return custom_urls + urls
-    
-    def payment_summary_view(self, request):
-        """View to display payment summary by month"""
-        class YearMonthForm(forms.Form):
-            year = forms.IntegerField(min_value=2000, max_value=2100, initial=timezone.now().year)
-            month = forms.ChoiceField(
-                choices=[(i, calendar.month_name[i]) for i in range(1, 13)], 
-                initial=timezone.now().month
-            )
-        
-        if request.method == 'POST':
-            form = YearMonthForm(request.POST)
-            if form.is_valid():
-                year = form.cleaned_data['year']
-                month = int(form.cleaned_data['month'])
-            else:
-                year = timezone.now().year
-                month = timezone.now().month
-        else:
-            form = YearMonthForm()
-            year = timezone.now().year
-            month = timezone.now().month
-        
-        # Get payments for the selected month
-        payments = MonthlyPayment.objects.filter(year=year, month=month)
-        
-        # Get summary statistics
-        total_paid = payments.filter(is_paid=True).aggregate(Sum('total_payment'))['total_payment__sum'] or 0
-        total_unpaid = payments.filter(is_paid=False).aggregate(Sum('total_payment'))['total_payment__sum'] or 0
-        total_role = payments.aggregate(Sum('role_payment'))['role_payment__sum'] or 0
-        total_loader = payments.aggregate(Sum('loader_payment'))['loader_payment__sum'] or 0
-        
-        context = {
-            'title': f"Payment Summary for {calendar.month_name[month]} {year}",
-            'form': form,
-            'payments': payments,
-            'stats': {
-                'total_paid': total_paid,
-                'total_unpaid': total_unpaid,
-                'total_role': total_role,
-                'total_loader': total_loader,
-                'total': total_paid + total_unpaid,
-            },
-            'month_name': calendar.month_name[month],
-            'year': year,
-        }
-        
-        return render(request, 'admin/payment_summary.html', context)
+    export_to_csv.short_description = "Export selected payments to CSV"
+
 
 # Payment Period Admin
 @admin.register(PaymentPeriod)
 class PaymentPeriodAdmin(admin.ModelAdmin):
-    list_display = ('staff', 'period_name', 'role_payment', 'loader_payment', 'total_payment', 'is_paid', 'payment_date')
-    list_filter = ('is_paid', 'staff__role', 'period_start', 'period_end')
+    list_display = ('staff_name', 'period_display', 'role_payment', 'loader_payment', 
+                'total_payment', 'payment_status', 'payment_date')
+    list_filter = ('is_paid', 'period_start', 'staff__role')
     search_fields = ('staff__name',)
-    actions = ['export_csv', 'mark_as_paid']
     date_hierarchy = 'period_start'
+    actions = ['mark_as_paid', 'mark_as_unpaid', 'export_to_csv']
     
-    def export_csv(self, request, queryset):
-        """Export selected period payments as CSV"""
-        output = StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['Staff Name', 'Role', 'Period Start', 'Period End', 'Role Payment', 
-                         'Loader Payment', 'Total Payment', 'Is Paid', 'Payment Date'])
+    fieldsets = (
+        ('Payment Information', {
+            'fields': ('staff', 'period_start', 'period_end', 'role_payment', 'loader_payment', 'total_payment')
+        }),
+        ('Payment Status', {
+            'fields': ('is_paid', 'payment_date')
+        }),
+    )
+    
+    readonly_fields = ('total_payment',)
+    
+    def staff_name(self, obj):
+        return obj.staff.name
+    staff_name.admin_order_field = 'staff__name'
+    staff_name.short_description = 'Staff'
+    
+    def period_display(self, obj):
+        return obj.period_name
+    period_display.short_description = 'Period'
+    
+    def payment_status(self, obj):
+        if obj.is_paid:
+            return format_html(
+                '<span style="color:green;">✓ Paid</span> on {}'.format(
+                    obj.payment_date.strftime('%d %b %Y') if obj.payment_date else 'Unknown date'
+                )
+            )
+        else:
+            return format_html('<span style="color:red;">Unpaid</span>')
+    payment_status.short_description = 'Status'
+    
+    def mark_as_paid(self, request, queryset):
+        """Mark selected payments as paid"""
+        queryset.update(is_paid=True, payment_date=timezone.now().date())
+        messages.success(request, f"Marked {queryset.count()} payments as paid")
+    mark_as_paid.short_description = "Mark selected payments as paid"
+    
+    def mark_as_unpaid(self, request, queryset):
+        """Mark selected payments as unpaid"""
+        queryset.update(is_paid=False, payment_date=None)
+        messages.success(request, f"Marked {queryset.count()} payments as unpaid")
+    mark_as_unpaid.short_description = "Mark selected payments as unpaid"
+    
+    def export_to_csv(self, request, queryset):
+        """Export selected payments to CSV"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="custom_period_payments.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow([
+            'Staff Name', 'Role', 'Period Start', 'Period End', 'Role Payment', 
+            'Loader Payment', 'Total Payment', 'Payment Status', 'Payment Date'
+        ])
         
         for payment in queryset:
             writer.writerow([
@@ -490,106 +810,39 @@ class PaymentPeriodAdmin(admin.ModelAdmin):
                 payment.role_payment,
                 payment.loader_payment,
                 payment.total_payment,
-                'Yes' if payment.is_paid else 'No',
-                payment.payment_date if payment.payment_date else ''
+                'Paid' if payment.is_paid else 'Unpaid',
+                payment.payment_date or 'N/A'
             ])
         
-        response = HttpResponse(output.getvalue(), content_type='text/csv')
-        response['Content-Disposition'] = 'attachment; filename=period_payments.csv'
         return response
-    export_csv.short_description = "Export selected period payments to CSV"
-    
-    def mark_as_paid(self, request, queryset):
-        """Mark selected period payments as paid"""
-        queryset.update(is_paid=True, payment_date=timezone.now().date())
-        messages.success(request, f"{queryset.count()} period payments marked as paid")
-    mark_as_paid.short_description = "Mark selected period payments as paid"
-    
-    def get_urls(self):
-        urls = super().get_urls()
-        custom_urls = [
-            path('period-summary/', self.admin_site.admin_view(self.period_summary_view), name='period-summary'),
-        ]
-        return custom_urls + urls
-    
-    def period_summary_view(self, request):
-        """View to display payment summary by custom period"""
-        class DateRangeForm(forms.Form):
-            start_date = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}))
-            end_date = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}))
-        
-        if request.method == 'POST':
-            form = DateRangeForm(request.POST)
-            if form.is_valid():
-                start_date = form.cleaned_data['start_date']
-                end_date = form.cleaned_data['end_date']
-            else:
-                start_date = timezone.now().replace(day=1).date()
-                end_date = timezone.now().date()
-        else:
-            form = DateRangeForm(initial={
-                'start_date': timezone.now().replace(day=1).date(),
-                'end_date': timezone.now().date()
-            })
-            start_date = timezone.now().replace(day=1).date()
-            end_date = timezone.now().date()
-        
-        # Get payments for the selected period (exact match)
-        payments = PaymentPeriod.objects.filter(period_start=start_date, period_end=end_date)
-        
-        # Get summary statistics
-        total_paid = payments.filter(is_paid=True).aggregate(Sum('total_payment'))['total_payment__sum'] or 0
-        total_unpaid = payments.filter(is_paid=False).aggregate(Sum('total_payment'))['total_payment__sum'] or 0
-        total_role = payments.aggregate(Sum('role_payment'))['role_payment__sum'] or 0
-        total_loader = payments.aggregate(Sum('loader_payment'))['loader_payment__sum'] or 0
-        
-        context = {
-            'title': f"Payment Summary for Period {start_date} to {end_date}",
-            'form': form,
-            'payments': payments,
-            'stats': {
-                'total_paid': total_paid,
-                'total_unpaid': total_unpaid,
-                'total_role': total_role,
-                'total_loader': total_loader,
-                'total': total_paid + total_unpaid,
-            },
-            'start_date': start_date,
-            'end_date': end_date,
-        }
-        
-        return render(request, 'admin/period_payment_summary.html', context)
+    export_to_csv.short_description = "Export selected payments to CSV"
 
-# Staff Assignment Admin
+
+# Register the StaffAssignment model (for advanced filtering and reporting)
 @admin.register(StaffAssignment)
 class StaffAssignmentAdmin(admin.ModelAdmin):
-    list_display = ('staff', 'delivery', 'role', 'helped_loading', 'display_payments')
-    list_filter = ('role', 'helped_loading', 'delivery__date')
+    list_display = ('staff_name', 'role', 'delivery_info', 'delivery_date', 'helped_loading')
+    list_filter = ('role', 'helped_loading', 'delivery__date', 'staff__role')
     search_fields = ('staff__name', 'delivery__destination')
-    autocomplete_fields = ['staff', 'delivery']
+    date_hierarchy = 'delivery__date'
     
-    def display_payments(self, obj):
-        """Display payment info for this staff assignment"""
-        if not obj.id:
-            return "N/A"
-            
-        try:
-            payroll = PayrollManager.objects.get(staff=obj.staff, delivery=obj.delivery)
-            if obj.helped_loading:
-                return f"Role: Ksh {payroll.role_pay:.2f}, Loading: Ksh {payroll.loader_pay:.2f}"
-            else:
-                return f"Role: Ksh {payroll.role_pay:.2f}"
-        except PayrollManager.DoesNotExist:
-            return "No payment record"
-    display_payments.short_description = "Payments"
+    def staff_name(self, obj):
+        return obj.staff.name
+    staff_name.admin_order_field = 'staff__name'
+    staff_name.short_description = 'Staff'
     
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        # Filter staff to only show turnboys and loaders
-        if db_field.name == "staff":
-            kwargs["queryset"] = Staff.objects.filter(
-                Q(role__in=['turnboy', 'loader']) & Q(is_active=True)
-            )
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
-
-# Add missing import for mark_safe
-from django.utils.safestring import mark_safe
+    def delivery_info(self, obj):
+        return f"{obj.delivery.destination} ({obj.delivery.vehicle.plate_number})"
+    delivery_info.short_description = 'Delivery'
+    
+    def delivery_date(self, obj):
+        return obj.delivery.date
+    delivery_date.admin_order_field = 'delivery__date'
+    delivery_date.short_description = 'Date'
+    
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('staff', 'delivery', 'delivery__vehicle')
+    
+    def has_add_permission(self, request):
+        # Discourage direct creation - these should be managed via Delivery
+        return False
