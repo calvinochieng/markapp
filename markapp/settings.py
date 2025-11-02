@@ -9,7 +9,7 @@ SECRET_KEY = 'django-insecure-cogi&(cm0f&@#n^$%_rf8aurcb#$+mx8vvk-bm8129%z+h45u2
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['markapp-ltqq.onrender.com','127.0.0.1', 'localhost']
 
 
 # Application definition
