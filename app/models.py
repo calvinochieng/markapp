@@ -20,10 +20,11 @@ class Staff(models.Model):
         ('loader', 'Loader'),
     ]
     
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=100, unique=True)
     phone_number = models.CharField(max_length=15, blank=True, null=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, db_index=True, default='turnboy')
-    is_loader = models.BooleanField(default=False, help_text="Check if this person can also work as a loader")
+    is_loader = models.BooleanField(default=True, help_text="Check if this person can also work as a loader")
+    
     date_joined = models.DateField(default=timezone.now)
     is_active = models.BooleanField(default=True, db_index=True)
     
@@ -118,7 +119,7 @@ class Delivery(models.Model):
         max_digits=10, decimal_places=2,
         help_text="Total amount paid for loading"
     )
-    notes = models.TextField(blank=True)
+    notes = models.TextField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed')
 
     class Meta:
@@ -179,10 +180,6 @@ class StaffAssignment(models.Model):
         return f"{self.staff.name} as {self.get_role_display()} for {self.delivery}"
     
     def clean(self):
-        # Ensure staff member's role matches their assigned role
-        if self.staff.role != self.role:
-            raise ValidationError(f"Staff member {self.staff.name} is a {self.staff.get_role_display()}, not a {self.get_role_display()}")
-        
         # Ensure loaders always have helped_loading set to True
         if self.role == 'loader':
             self.helped_loading = True

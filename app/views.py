@@ -62,268 +62,436 @@ def logout_view(request):
 # //////End of Auth Views///////
 
 # /////Dashboard View//////
+from django.shortcuts import render, redirect
+from django.contrib.auth.decorators import login_required
+from django.utils import timezone
+from django.db.models import Count, Sum, F, Q
+from django.db.models.functions import TruncMonth, TruncWeek
+import calendar
+from decimal import Decimal
+from datetime import datetime, timedelta
+import json
+
+from .models import (
+    Staff, 
+    Vehicle, 
+    Delivery, 
+    StaffAssignment, 
+    MonthlyPayment, 
+    PaymentPeriod,
+    PayrollManager
+)
 
 @login_required
 def dashboard(request):
-    """
-    Enhanced dashboard view showing comprehensive staff payment information
-    with filtering options for custom date ranges rather than just month/year
-    """
-    # Get today's date
+    """Main dashboard view displaying summary of operations"""
+    # Get current date and time info
     today = timezone.now().date()
+    current_month = today.month
+    current_year = today.year
     
-    # Default date range: last 30 days if no dates are specified
-    default_end_date = today
-    default_start_date = today - timezone.timedelta(days=30)
+    # Calculate dates for filtering
+    start_of_month = timezone.datetime(current_year, current_month, 1).date()
+    _, last_day = calendar.monthrange(current_year, current_month)
+    end_of_month = timezone.datetime(current_year, current_month, last_day).date()
     
-    # Get selected date range from request parameters
-    try:
-        start_date = request.GET.get('start_date')
-        start_date = timezone.datetime.strptime(start_date, '%Y-%m-%d').date() if start_date else default_start_date
-        
-        end_date = request.GET.get('end_date')
-        end_date = timezone.datetime.strptime(end_date, '%Y-%m-%d').date() if end_date else default_end_date
-        
-        # Ensure end_date is not before start_date
-        if end_date < start_date:
-            end_date = start_date
-    except (ValueError, TypeError):
-        # If any errors in parsing dates, use defaults
-        start_date = default_start_date
-        end_date = default_end_date
+    # Last 30 days
+    thirty_days_ago = today - timedelta(days=30)
     
-    # Create date range tuple
-    date_range = (start_date, end_date)
+    # Get counts of active staff and vehicles
+    active_staff_count = Staff.objects.filter(is_active=True).count()
+    active_vehicles_count = Vehicle.objects.filter(is_active=True).count()
     
-    # Deliveries for the selected period - using select_related for optimization
-    deliveries = (Delivery.objects
-                 .filter(date__range=date_range)
-                 .select_related('vehicle', 'driver')
-                 .prefetch_related(
-                     'staffassignment_set__staff'
-                 )
-                 .order_by('-date', '-time'))
+    # Get delivery stats
+    total_deliveries = Delivery.objects.count()
+    month_deliveries = Delivery.objects.filter(date__range=(start_of_month, end_of_month)).count()
+    recent_deliveries = Delivery.objects.filter(date__range=(thirty_days_ago, today)).count()
     
-    # Aggregate delivery statistics in a single query
-    delivery_stats = deliveries.aggregate(
-        total_loading=Sum('loading_amount'),
-        delivery_count=Count('id'),
-        completed_count=Count('id', filter=Q(status='completed')),
-        in_progress_count=Count('id', filter=Q(status='in_progress')),
-        pending_count=Count('id', filter=Q(status='pending'))
-    )
+    # Get pending deliveries
+    pending_deliveries = Delivery.objects.filter(status='pending').count()
+    in_progress_deliveries = Delivery.objects.filter(status='in_progress').count()
     
-    # Staff statistics
-    staff_stats = {
-        'active_total': Staff.objects.filter(is_active=True).count(),
-        'drivers': Staff.objects.filter(role='driver', is_active=True).count(),
-        'turnboys': Staff.objects.filter(role='turnboy', is_active=True).count(),
-        'loaders': Staff.objects.filter(Q(role='loader') | Q(is_loader=True), is_active=True).count(),
-    }
+    # Calculate payroll stats
+    total_payroll = PayrollManager.objects.all().aggregate(
+        total=Sum('total_pay')
+    )['total'] or Decimal('0.00')
     
-    # Vehicle statistics
-    vehicle_stats = {
-        'active_total': Vehicle.objects.filter(is_active=True).count(),
-        'trucks': Vehicle.objects.filter(vehicle_type='truck', is_active=True).count(),
-        'vans': Vehicle.objects.filter(vehicle_type='van', is_active=True).count(),
-        'buses': Vehicle.objects.filter(vehicle_type='bus', is_active=True).count(),
-    }
+    month_payroll = PayrollManager.objects.filter(
+        delivery__date__range=(start_of_month, end_of_month)
+    ).aggregate(
+        total=Sum('total_pay')
+    )['total'] or Decimal('0.00')
+    
+    # Get monthly delivery trends - last 6 months
+    six_months_ago = today - timedelta(days=180)
+    monthly_delivery_data = Delivery.objects.filter(
+        date__gte=six_months_ago
+    ).annotate(
+        month=TruncMonth('date')
+    ).values('month').annotate(
+        count=Count('id')
+    ).order_by('month')
+    
+    # Format the data for charts
+    monthly_labels = []
+    monthly_counts = []
+    
+    for item in monthly_delivery_data:
+        # Format as 'Jan', 'Feb', etc.
+        month_str = item['month'].strftime('%b')
+        monthly_labels.append(month_str)
+        monthly_counts.append(item['count'])
+    
+    # Get recent deliveries for display
+    recent_delivery_list = Delivery.objects.all().order_by('-date')[:5]
+    
+    # Top staff by deliveries in the current month
+    top_staff = StaffAssignment.objects.filter(
+        delivery__date__range=(start_of_month, end_of_month)
+    ).values(
+        'staff__name', 'staff__role'
+    ).annotate(
+        delivery_count=Count('delivery')
+    ).order_by('-delivery_count')[:5]
     
     # Top destinations
-    top_destinations = (Delivery.objects
-                       .filter(date__range=date_range)
-                       .values('destination')
-                       .annotate(count=Count('id'))
-                       .order_by('-count')[:5])
+    top_destinations = Delivery.objects.values(
+        'destination'
+    ).annotate(
+        count=Count('id')
+    ).order_by('-count')[:5]
     
-    # Top performing staff members - now includes all drivers using the driver field
-    top_drivers = (Staff.objects
-                   .filter(role='driver')
-                   .annotate(
-                       delivery_count=Count(
-                           'driver_deliveries',
-                           filter=Q(driver_deliveries__date__range=date_range)
-                       )
-                   )
-                   .order_by('-delivery_count')[:5])
-    
-    # Top performing turnboys - using StaffAssignment model
-    top_turnboys = (Staff.objects
-                    .filter(role='turnboy')
-                    .annotate(
-                        delivery_count=Count(
-                            'staffassignment',
-                            filter=Q(
-                                staffassignment__role='turnboy',
-                                staffassignment__delivery__date__range=date_range
-                            )
-                        )
-                    )
-                    .order_by('-delivery_count')[:5])
-    
-    # Calculate payment statistics from PayrollManager for non-driver roles
-    payroll_stats = PayrollManager.objects.filter(
-        delivery__date__range=date_range,
-        staff__role__in=['turnboy', 'loader']  # Only include non-driver roles
+    # Status of monthly payments
+    payment_stats = MonthlyPayment.objects.filter(
+        year=current_year,
+        month=current_month
     ).aggregate(
-        total_role_pay=Sum('role_pay'),
-        total_loader_pay=Sum('loader_pay'),
-        total_pay=Sum('total_pay')
+        total=Sum('total_payment'),
+        paid_count=Count('id', filter=Q(is_paid=True)),
+        unpaid_count=Count('id', filter=Q(is_paid=False))
     )
     
-    # Payment statistics by role (excluding drivers)
-    turnboy_payments = PayrollManager.objects.filter(
-        delivery__date__range=date_range,
-        staff__role='turnboy'
-    ).aggregate(
-        role_pay=Sum('role_pay'),
-        loader_pay=Sum('loader_pay'),
-        total=Sum('total_pay')
-    )
+    # Vehicle usage stats
+    vehicle_usage = Delivery.objects.filter(
+        date__range=(thirty_days_ago, today)
+    ).values(
+        'vehicle__plate_number'
+    ).annotate(
+        trip_count=Count('id')
+    ).order_by('-trip_count')
     
-    loader_payments = PayrollManager.objects.filter(
-        delivery__date__range=date_range,
-        staff__role='loader'
-    ).aggregate(
-        role_pay=Sum('role_pay'),
-        loader_pay=Sum('loader_pay'),
-        total=Sum('total_pay')
-    )
-    
-    # Calculate total loading amount
-    total_loading_amount = delivery_stats['total_loading'] or 0
-    
-    # Calculate total payments by role
-    total_role_payments = payroll_stats['total_role_pay'] or 0
-    total_loader_payments = payroll_stats['total_loader_pay'] or 0
-    total_turnboy_payments = turnboy_payments['total'] or 0
-    
-    # Calculate total deliveries amount
-    total_deliveries_amount = total_loading_amount
-    
-    # Recently completed deliveries
-    recent_deliveries = deliveries.filter(status='completed')[:5]
-    
-    # Payments from PaymentPeriod model that overlap with the selected date range
-    period_payments = PaymentPeriod.objects.filter(
-        Q(period_start__range=date_range) | 
-        Q(period_end__range=date_range) |
-        Q(period_start__lte=start_date, period_end__gte=end_date),
-        staff__role__in=['turnboy', 'loader']  # Only non-driver roles
-    ).aggregate(
-        paid_amount=Sum('total_payment', filter=Q(is_paid=True)),
-        unpaid_amount=Sum('total_payment', filter=Q(is_paid=False)),
-        total_amount=Sum('total_payment')
-    )
-    
-    # /////
-
-
-    # ... inside your dashboard view ...
-
-    # 1. Fetch relevant Staff Assignments (instead of aggregating directly)
-    helper_assignments = StaffAssignment.objects.filter(
-        delivery__date__range=date_range,
-        helped_loading=True
-    ).select_related('staff', 'delivery') # Crucial to fetch related data efficiently
-
-    # 2. Process in Python to calculate earnings per staff member
-    loading_earnings_by_staff = defaultdict(lambda: {'loading_count': 0, 'loading_earnings': Decimal(0)})
-
-    for assignment in helper_assignments:
-        staff_name = assignment.staff.name
-        # Call the model method here in Python
-        earnings = assignment.delivery.per_loader_amount()
-
-        loading_earnings_by_staff[staff_name]['loading_count'] += 1
-        loading_earnings_by_staff[staff_name]['loading_earnings'] += earnings
-
-    # 3. Convert to list and sort to get top helpers
-    loading_helpers_list = [
-        {'staff__name': name, **data}
-        for name, data in loading_earnings_by_staff.items()
-    ]
-
-    # Sort by count first (desc), then maybe earnings (desc) as a tie-breaker
-    loading_helpers_list.sort(key=lambda x: (x['loading_count'], x['loading_earnings']), reverse=True)
-
-    # 4. Get the top 5 for the context
-    loading_helpers = loading_helpers_list[:5]
-
-    # ... rest of your view, update context with this 'loading_helpers' ...
-    # Make sure the template ('dashboard/dashboard.html') is updated to expect
-    # 'staff__name', 'loading_count', and 'loading_earnings' keys for each item
-    # in the 'loading_helpers' list.
-
-    # Example context update:
+    # Prepare data for passing to the template
     context = {
-        # ... other context variables ...
-        'loading_helpers': loading_helpers,
-        # ...
-    }
-
-
-    # /////
-    
-    context = {
-        # Date range information
-        'start_date': start_date,
-        'end_date': end_date,
-        'date_range': f"{start_date.strftime('%d %b %Y')} - {end_date.strftime('%d %b %Y')}",
-        
-        # Deliveries information
-        'deliveries': deliveries[:10],  # Limit to 10 most recent for dashboard
-        'total_deliveries': delivery_stats['delivery_count'] or 0,
-        'completed_deliveries': delivery_stats['completed_count'] or 0,
-        'in_progress_deliveries': delivery_stats['in_progress_count'] or 0,
-        'pending_deliveries': delivery_stats['pending_count'] or 0,
+        # Basic counts
+        'active_staff_count': active_staff_count,
+        'active_vehicles_count': active_vehicles_count,
+        'total_deliveries': total_deliveries,
+        'month_deliveries': month_deliveries,
         'recent_deliveries': recent_deliveries,
         
-        # Staff information
-        'active_staff': staff_stats['active_total'],
-        'active_drivers': staff_stats['drivers'],
-        'active_turnboys': staff_stats['turnboys'],
-        'loaders_available': staff_stats['loaders'],
-        'top_drivers': top_drivers,
-        'top_turnboys': top_turnboys,
-        'loading_helpers': loading_helpers,
+        # Delivery status
+        'pending_deliveries': pending_deliveries,
+        'in_progress_deliveries': in_progress_deliveries,
         
-        # Vehicle information
-        'active_vehicles': vehicle_stats['active_total'],
-        'active_trucks': vehicle_stats['trucks'],
-        'active_vans': vehicle_stats['vans'],
-        'active_buses': vehicle_stats['buses'],
+        # Financial stats
+        'total_payroll': total_payroll,
+        'month_payroll': month_payroll,
         
-        # Delivery destinations
+        # Chart data (converted to JSON for JavaScript)
+        'monthly_labels': json.dumps(monthly_labels),
+        'monthly_counts': json.dumps(monthly_counts),
+        
+        # Lists for tables
+        'recent_delivery_list': recent_delivery_list,
+        'top_staff': top_staff,
         'top_destinations': top_destinations,
+        'vehicle_usage': vehicle_usage,
         
-        # Payment information (excluding drivers)
-        'total_deliveries_amount': total_deliveries_amount,
-        'total_loading_amount': total_loading_amount,
-        'total_role_payments': total_role_payments,
-        'total_loader_payments': total_loader_payments,
-        'total_turnboy_payments': total_turnboy_payments,
-        'turnboy_payments': {
-            'role': turnboy_payments['role_pay'] or 0,
-            'loader': turnboy_payments['loader_pay'] or 0,
-            'total': turnboy_payments['total'] or 0
-        },
-        'loader_payments': {
-            'role': loader_payments['role_pay'] or 0,
-            'loader': loader_payments['loader_pay'] or 0,
-            'total': loader_payments['total'] or 0
-        },
-        'total_pay': payroll_stats['total_pay'] or 0,
+        # Payment status
+        'payment_stats': payment_stats,
         
-        # Period payment stats (excluding drivers)
-        'period_paid': period_payments['paid_amount'] or 0,
-        'period_unpaid': period_payments['unpaid_amount'] or 0,
-        'period_total': period_payments['total_amount'] or 0,
+        # Time context
+        'current_month': calendar.month_name[current_month],
+        'current_year': current_year,
     }
     
     return render(request, 'dashboard/dashboard.html', context)
 
+@login_required
+def staff_dashboard(request):
+    """Dashboard focused on staff performance and payments"""
+    # Get current date and time info
+    today = timezone.now().date()
+    current_month = today.month
+    current_year = today.year
+    
+    # Calculate date ranges
+    start_of_month = timezone.datetime(current_year, current_month, 1).date()
+    _, last_day = calendar.monthrange(current_year, current_month)
+    end_of_month = timezone.datetime(current_year, current_month, last_day).date()
+    
+    # Get active staff with role counts
+    turnboy_count = Staff.objects.filter(is_active=True, role='turnboy').count()
+    loader_count = Staff.objects.filter(is_active=True, role='loader').count()
+    
+    # Staff with most deliveries this month
+    top_staff_deliveries = StaffAssignment.objects.filter(
+        delivery__date__range=(start_of_month, end_of_month)
+    ).values(
+        'staff__id', 'staff__name', 'staff__role'
+    ).annotate(
+        delivery_count=Count('delivery')
+    ).order_by('-delivery_count')[:10]
+    
+    # Staff with highest earnings this month
+    top_staff_earnings = PayrollManager.objects.filter(
+        delivery__date__range=(start_of_month, end_of_month)
+    ).values(
+        'staff__id', 'staff__name', 'staff__role'
+    ).annotate(
+        total_earned=Sum('total_pay')
+    ).order_by('-total_earned')[:10]
+    
+    # Payment status overview
+    payment_status = MonthlyPayment.objects.filter(
+        year=current_year,
+        month=current_month
+    ).aggregate(
+        total_due=Sum('total_payment'),
+        paid_amount=Sum('total_payment', filter=Q(is_paid=True)),
+        unpaid_amount=Sum('total_payment', filter=Q(is_paid=False)),
+        staff_paid=Count('id', filter=Q(is_paid=True)),
+        staff_unpaid=Count('id', filter=Q(is_paid=False))
+    )
+    
+    # Staff who helped loading the most
+    top_loaders = StaffAssignment.objects.filter(
+        helped_loading=True,
+        delivery__date__range=(start_of_month, end_of_month)
+    ).values(
+        'staff__id', 'staff__name'
+    ).annotate(
+        loading_count=Count('delivery')
+    ).order_by('-loading_count')[:5]
+    
+    # Recent payments made
+    recent_payments = MonthlyPayment.objects.filter(
+        is_paid=True
+    ).order_by('-payment_date')[:5]
+    
+    # Context data for template
+    context = {
+        'turnboy_count': turnboy_count,
+        'loader_count': loader_count,
+        'top_staff_deliveries': top_staff_deliveries,
+        'top_staff_earnings': top_staff_earnings,
+        'payment_status': payment_status,
+        'top_loaders': top_loaders,
+        'recent_payments': recent_payments,
+        'current_month': calendar.month_name[current_month],
+        'current_year': current_year,
+    }
+    
+    return render(request, 'dashboard/staff_dashboard.html', context)
 
+@login_required
+def delivery_dashboard(request):
+    """Dashboard focused on delivery statistics and performance"""
+    # Get current date and time info
+    today = timezone.now().date()
+    current_month = today.month
+    current_year = today.year
+    
+    # Calculate date ranges
+    start_of_month = timezone.datetime(current_year, current_month, 1).date()
+    _, last_day = calendar.monthrange(current_year, current_month)
+    end_of_month = timezone.datetime(current_year, current_month, last_day).date()
+    
+    # Last 30 days for recent stats
+    thirty_days_ago = today - timedelta(days=30)
+    
+    # Get weekly delivery trends
+    weekly_delivery_data = Delivery.objects.filter(
+        date__gte=thirty_days_ago
+    ).annotate(
+        week=TruncWeek('date')
+    ).values('week').annotate(
+        count=Count('id')
+    ).order_by('week')
+    
+    # Format for charts
+    weekly_labels = []
+    weekly_counts = []
+    
+    for item in weekly_delivery_data:
+        # Format as 'Week of Mon, DD'
+        week_str = item['week'].strftime('Week of %b %d')
+        weekly_labels.append(week_str)
+        weekly_counts.append(item['count'])
+    
+    # Delivery status breakdown
+    status_counts = Delivery.objects.values(
+        'status'
+    ).annotate(
+        count=Count('id')
+    )
+    
+    # Delivery destinations analysis
+    destination_data = Delivery.objects.filter(
+        date__range=(start_of_month, end_of_month)
+    ).values(
+        'destination'
+    ).annotate(
+        count=Count('id')
+    ).order_by('-count')
+    
+    # Vehicle performance
+    vehicle_performance = Delivery.objects.filter(
+        date__range=(start_of_month, end_of_month)
+    ).values(
+        'vehicle__plate_number', 'vehicle__vehicle_type'
+    ).annotate(
+        delivery_count=Count('id')
+    ).order_by('-delivery_count')
+    
+    # Average loaders per delivery
+    avg_loaders = Delivery.objects.filter(
+        date__range=(start_of_month, end_of_month)
+    ).annotate(
+        loader_count=Count('staffassignment', filter=Q(staffassignment__helped_loading=True))
+    ).aggregate(
+        avg=Avg('loader_count')
+    )['avg'] or 0
+    
+    # Recent deliveries with details
+    recent_deliveries = Delivery.objects.select_related('vehicle').prefetch_related(
+        'staffassignment_set__staff'
+    ).order_by('-date')[:10]
+    
+    # Context data for template
+    context = {
+        'weekly_labels': json.dumps(weekly_labels),
+        'weekly_counts': json.dumps(weekly_counts),
+        'status_counts': status_counts,
+        'destination_data': destination_data,
+        'vehicle_performance': vehicle_performance,
+        'avg_loaders': avg_loaders,
+        'recent_deliveries': recent_deliveries,
+        'current_month': calendar.month_name[current_month],
+        'current_year': current_year,
+    }
+    
+    # Fix for the missing Avg import
+    try:
+        from django.db.models import Avg
+        avg_loaders = Delivery.objects.filter(
+            date__range=(start_of_month, end_of_month)
+        ).annotate(
+            loader_count=Count('staffassignment', filter=Q(staffassignment__helped_loading=True))
+        ).aggregate(
+            avg=Avg('loader_count')
+        )['avg'] or 0
+        context['avg_loaders'] = avg_loaders
+    except ImportError:
+        context['avg_loaders'] = 0
+    
+    return render(request, 'dashboard/delivery_dashboard.html', context)
+
+@login_required
+def payroll_dashboard(request):
+    """Dashboard focused on payroll and financial metrics"""
+    # Get current date and time info
+    today = timezone.now().date()
+    current_month = today.month
+    current_year = today.year
+    
+    # Calculate date ranges
+    start_of_month = timezone.datetime(current_year, current_month, 1).date()
+    _, last_day = calendar.monthrange(current_year, current_month)
+    end_of_month = timezone.datetime(current_year, current_month, last_day).date()
+    
+    # Last 6 months for trends
+    six_months_ago = today - timedelta(days=180)
+    
+    # Monthly payroll trends
+    monthly_payroll_data = PayrollManager.objects.filter(
+        delivery__date__gte=six_months_ago
+    ).annotate(
+        month=TruncMonth('delivery__date')
+    ).values('month').annotate(
+        total=Sum('total_pay'),
+        role_pay=Sum('role_pay'),
+        loader_pay=Sum('loader_pay')
+    ).order_by('month')
+    
+    # Format for charts
+    monthly_labels = []
+    monthly_totals = []
+    monthly_role_pay = []
+    monthly_loader_pay = []
+    
+    for item in monthly_payroll_data:
+        month_str = item['month'].strftime('%b %Y')
+        monthly_labels.append(month_str)
+        monthly_totals.append(float(item['total']))
+        monthly_role_pay.append(float(item['role_pay']))
+        monthly_loader_pay.append(float(item['loader_pay']))
+    
+    # Current month payment status
+    payment_status = MonthlyPayment.objects.filter(
+        year=current_year,
+        month=current_month
+    ).aggregate(
+        total_amount=Sum('total_payment'),
+        paid_amount=Sum('total_payment', filter=Q(is_paid=True)),
+        unpaid_amount=Sum('total_payment', filter=Q(is_paid=False)),
+        paid_count=Count('id', filter=Q(is_paid=True)),
+        unpaid_count=Count('id', filter=Q(is_paid=False))
+    )
+    
+    # Staff payment breakdown by role
+    role_breakdown = MonthlyPayment.objects.filter(
+        year=current_year,
+        month=current_month
+    ).values(
+        'staff__role'
+    ).annotate(
+        total=Sum('total_payment'),
+        role_pay=Sum('role_payment'),
+        loader_pay=Sum('loader_payment')
+    )
+    
+    # Pending payments list
+    pending_payments = MonthlyPayment.objects.filter(
+        is_paid=False
+    ).select_related('staff').order_by('year', 'month')[:15]
+    
+    # Recent payments
+    recent_payments = MonthlyPayment.objects.filter(
+        is_paid=True
+    ).select_related('staff').order_by('-payment_date')[:10]
+    
+    # Custom period payments
+    custom_period_payments = PaymentPeriod.objects.filter(
+        is_paid=False
+    ).select_related('staff').order_by('period_end')[:10]
+    
+    # Context data for template
+    context = {
+        'monthly_labels': json.dumps(monthly_labels),
+        'monthly_totals': json.dumps(monthly_totals),
+        'monthly_role_pay': json.dumps(monthly_role_pay),
+        'monthly_loader_pay': json.dumps(monthly_loader_pay),
+        'payment_status': payment_status,
+        'role_breakdown': role_breakdown,
+        'pending_payments': pending_payments,
+        'recent_payments': recent_payments,
+        'custom_period_payments': custom_period_payments,
+        'current_month': calendar.month_name[current_month],
+        'current_year': current_year,
+    }
+    
+    return render(request, 'dashboard/dashboard.html', context)
 # //////End of Dashboard View//////
 
 
@@ -934,12 +1102,12 @@ def individual_payroll(request):
         response['Content-Disposition'] = f'attachment; filename="{selected_staff.name}_payroll_{start_date.strftime("%Y%m%d")}_{end_date.strftime("%Y%m%d")}.csv"'
         
         writer = csv.writer(response)
-        writer.writerow(['Delivery Date', 'Vehicle', 'Role Payment', 'Loader Payment', 'Total Payment'])
+        writer.writerow(['Delivery Date', 'Vehicle', 'Turnboy Payment', 'Loader Payment', 'Total Payment'])
         
         for delivery in staff_data['deliveries']:
             writer.writerow([
                 delivery.delivery.date.strftime('%Y-%m-%d'),
-                delivery.delivery.vehicle.name if delivery.delivery.vehicle else 'N/A',
+                delivery.delivery.vehicle.plate_number if delivery.delivery.vehicle else 'N/A',
                 delivery.role_pay,
                 delivery.loader_pay,
                 delivery.total_pay

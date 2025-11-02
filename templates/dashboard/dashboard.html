@@ -165,15 +165,15 @@
     <div class="hero-body">
       <h1 class="title is-1 has-text-centered mb-5">Delivery Management Dashboard</h1>
       
-      <!-- Date Range Filter -->
+      <!-- Date Info -->
       <div class="filter-container box mb-5">
-        <h3 class="title is-5 mb-3">Data for: {{ date_range }}</h3>
+        <h3 class="title is-5 mb-3">Data for: {{ current_month }} {{ current_year }}</h3>
         <form method="get" class="columns is-vcentered is-mobile-stacked">
           <div class="column is-4">
             <div class="field">
               <label class="label">Start Date</label>
               <div class="control">
-                <input type="date" name="start_date" class="input is-rounded" value="{{ start_date|date:'Y-m-d' }}">
+                <input type="date" name="start_date" class="input is-rounded">
               </div>
             </div>
           </div>
@@ -181,7 +181,7 @@
             <div class="field">
               <label class="label">End Date</label>
               <div class="control">
-                <input type="date" name="end_date" class="input is-rounded" value="{{ end_date|date:'Y-m-d' }}">
+                <input type="date" name="end_date" class="input is-rounded">
               </div>
             </div>
           </div>
@@ -208,7 +208,7 @@
               {{ total_deliveries }}
             </p>
             <div class="tags">
-              <span class="tag is-light is-success is-normal">{{ completed_deliveries }} Completed</span>
+              <!-- Use the data from the view -->
               <span class="tag is-light is-warning is-normal">{{ pending_deliveries }} Pending</span>
               <span class="tag is-light is-info is-normal">{{ in_progress_deliveries }} In Progress</span>
             </div>
@@ -222,12 +222,11 @@
           <div class="dashboard-card box">
             <p class="has-text-grey">Active Staff</p>
             <p class="stat-number" id="active-staff">
-              {{ active_staff }}
+              {{ active_staff_count }}
             </p>            
             <div class="tags">
-                <span class="tag is-light is-info is-normal">{{ active_drivers }} Drivers</span>
-                <span class="tag is-light is-success is-normal">{{ active_turnboys }} Turnboys</span>
-                <span class="tag is-light is-warning is-normal">{{ loaders_available }} Loaders</span>
+                <!-- No detailed staff breakdown in view, can be added later -->
+                <span class="tag is-light is-info is-normal">Staff Members</span>
             </div>
             <button class="button mt-4 is-info is-rounded action-button is-fullwidth"
                     onclick="window.location.href='/admin/app/staff/add/'">
@@ -238,11 +237,9 @@
         <div class="column is-3">
           <div class="dashboard-card box">
             <p class="has-text-grey">Payment Summary</p>
-            <p class="stat-number"><small>Ksh</small> <span id="total-salary">{{ total_pay|floatformat:2 }}/=</span></p>
+            <p class="stat-number"><small>Ksh</small> <span id="total-salary">{{ total_payroll|floatformat:2 }}/=</span></p>
             <div class="mb-4">
-              <p class="has-text-grey">Loading: {{ total_loading_amount|floatformat:2 }}/=</p>
-              <p class="has-text-grey">Turnboy: {{ total_turnboy_payments|floatformat:2 }}/=</p>
-              <p class="has-text-grey">Loader: {{ total_loader_payments|floatformat:2 }}/=</p>
+              <p class="has-text-grey">Month Payroll: {{ month_payroll|floatformat:2 }}/=</p>
             </div>
             <button class="button is-link is-rounded action-button is-fullwidth"
                     onclick="window.location.href='/admin/app/paymentperiod/'">
@@ -253,11 +250,9 @@
         <div class="column is-3">
           <div class="dashboard-card box">
             <p class="has-text-grey">Active Vehicles</p>
-            <p class="stat-number" id="active-vehicles">{{ active_vehicles }}</p>
+            <p class="stat-number" id="active-vehicles">{{ active_vehicles_count }}</p>
             <div class="tags">
-              <span class="tag is-light is-primary is-normal">{{ active_trucks }} Trucks</span>
-              <span class="tag is-light is-info is-normal">{{ active_vans }} Vans</span>
-              <span class="tag is-light is-success is-normal">{{ active_buses }} Buses</span>
+              <span class="tag is-light is-primary is-normal">Vehicles</span>
             </div>
             <button class="button is-success mt-4 is-rounded action-button is-fullwidth"
                     onclick="window.location.href='/admin/app/vehicle/add/'">
@@ -309,38 +304,32 @@
           </div>
         </div>
         
-        <!-- Top Drivers -->
+        <!-- Top Staff -->
         <div class="column is-6">
           <div class="box">
             <h3 class="title is-4 mb-3">
               <span class="icon has-text-info"><i class="fas fa-user-tie"></i></span>
-              <span>Top Drivers</span>
+              <span>Top Staff</span>
             </h3>
             <div class="table-container">
               <table class="table is-fullwidth is-hoverable">
                 <thead>
                   <tr>
-                    <th>Driver</th>
+                    <th>Name</th>
+                    <th>Role</th>
                     <th>Deliveries</th>
-                    <th>% of Total</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {% for driver in top_drivers %}
+                  {% for staff in top_staff %}
                   <tr>
-                    <td>{{ driver.name }}</td>
-                    <td>{{ driver.delivery_count }}</td>
-                    <td>
-                      {% if total_deliveries > 0 %}
-                        {% widthratio driver.delivery_count total_deliveries 100 %}%
-                      {% else %}
-                        0%
-                      {% endif %}
-                    </td>
+                    <td>{{ staff.staff__name }}</td>
+                    <td>{{ staff.staff__role }}</td>
+                    <td>{{ staff.delivery_count }}</td>
                   </tr>
                   {% empty %}
                   <tr>
-                    <td colspan="3" class="has-text-centered">No driver data available</td>
+                    <td colspan="3" class="has-text-centered">No staff data available</td>
                   </tr>
                   {% endfor %}
                 </tbody>
@@ -350,74 +339,31 @@
         </div>
       </div>
       
-      <!-- Added Section: Top Turnboys and Loading Helpers -->
+      <!-- Vehicle Usage Section -->
       <div class="columns mb-5">
-        <!-- Top Turnboys -->
-        <div class="column is-6">
+        <div class="column is-12">
           <div class="box">
             <h3 class="title is-4 mb-3">
-              <span class="icon has-text-success"><i class="fas fa-user-friends"></i></span>
-              <span>Top Turnboys</span>
+              <span class="icon has-text-success"><i class="fas fa-truck"></i></span>
+              <span>Vehicle Usage (Last 30 Days)</span>
             </h3>
             <div class="table-container">
               <table class="table is-fullwidth is-hoverable">
                 <thead>
                   <tr>
-                    <th>Turnboy</th>
-                    <th>Deliveries</th>
-                    <th>% of Total</th>
+                    <th>Vehicle (Plate Number)</th>
+                    <th>Trip Count</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {% for turnboy in top_turnboys %}
+                  {% for vehicle in vehicle_usage %}
                   <tr>
-                    <td>{{ turnboy.name }}</td>
-                    <td>{{ turnboy.delivery_count }}</td>
-                    <td>
-                      {% if total_deliveries > 0 %}
-                        {% widthratio turnboy.delivery_count total_deliveries 100 %}%
-                      {% else %}
-                        0%
-                      {% endif %}
-                    </td>
+                    <td>{{ vehicle.vehicle__plate_number }}</td>
+                    <td>{{ vehicle.trip_count }}</td>
                   </tr>
                   {% empty %}
                   <tr>
-                    <td colspan="3" class="has-text-centered">No turnboy data available</td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-        
-        <!-- Loading Helpers -->
-        <div class="column is-6">
-          <div class="box">
-            <h3 class="title is-4 mb-3">
-              <span class="icon has-text-warning"><i class="fas fa-people-carry"></i></span>
-              <span>Loading Helpers</span>
-            </h3>
-            <div class="table-container">
-              <table class="table is-fullwidth is-hoverable">
-                <thead>
-                  <tr>
-                    <th>Staff Name</th>
-                    <th>Loading Count</th>
-                    <th>Earnings (Ksh)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for helper in loading_helpers %}
-                  <tr>
-                    <td>{{ helper.staff__name }}</td>
-                    <td>{{ helper.loading_count }}</td>
-                    <td>{{ helper.loading_earnings|floatformat:2 }}</td>
-                  </tr>
-                  {% empty %}
-                  <tr>
-                    <td colspan="3" class="has-text-centered">No loading helpers data available</td>
+                    <td colspan="2" class="has-text-centered">No vehicle usage data available</td>
                   </tr>
                   {% endfor %}
                 </tbody>
@@ -433,27 +379,48 @@
           <div class="box">
             <h3 class="title is-4 mb-3">
               <span class="icon has-text-danger"><i class="fas fa-money-bill-wave"></i></span>
-              <span>Payment Status</span>
+              <span>Payment Status ({{ current_month }} {{ current_year }})</span>
             </h3>
+            {% if payment_stats %}
             <div class="columns">
               <div class="column is-4">
                 <div class="notification is-success">
                   <p class="title is-5">Paid</p>
-                  <p class="stat-medium">Ksh {{ period_paid|floatformat:2 }}</p>
+                  <p class="stat-medium">{{ payment_stats.paid_count }} payments</p>
                 </div>
               </div>
               <div class="column is-4">
                 <div class="notification is-warning">
                   <p class="title is-5">Unpaid</p>
-                  <p class="stat-medium">Ksh {{ period_unpaid|floatformat:2 }}</p>
+                  <p class="stat-medium">{{ payment_stats.unpaid_count }} payments</p>
                 </div>
               </div>
               <div class="column is-4">
                 <div class="notification is-info">
                   <p class="title is-5">Total</p>
-                  <p class="stat-medium">Ksh {{ period_total|floatformat:2 }}</p>
+                  <p class="stat-medium">Ksh {{ payment_stats.total|floatformat:2 }}</p>
                 </div>
               </div>
+            </div>
+            {% else %}
+            <div class="notification is-info">
+              <p>No payment data available for this period.</p>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      
+      <!-- Monthly Delivery Trends -->
+      <div class="columns mb-5">
+        <div class="column is-12">
+          <div class="box">
+            <h3 class="title is-4 mb-3">
+              <span class="icon has-text-primary"><i class="fas fa-chart-line"></i></span>
+              <span>Monthly Delivery Trends</span>
+            </h3>
+            <div class="chart-container">
+              <canvas id="monthlyDeliveryChart"></canvas>
             </div>
           </div>
         </div>
@@ -471,22 +438,16 @@
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Vehicle</th>
-                  <th>Driver</th>
-                  <th>Location</th>
-                  <th>Loading Amt</th>
+                  <th>Destination</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {% for delivery in recent_deliveries %}
+                {% for delivery in recent_delivery_list %}
                   <tr>
                     <td>{{ delivery.date }}</td>
-                    <td>{{ delivery.vehicle.plate_number }}</td>
-                    <td>{{ delivery.driver.name }}</td>
                     <td>{{ delivery.destination }}</td>
-                    <td>Ksh {{ delivery.loading_amount|floatformat:2 }}/=</td>
                     <td>
                       {% if delivery.status == 'completed' %}
                         <span class="tag status-tag completed">Completed</span>
@@ -509,7 +470,7 @@
                   </tr>
                 {% empty %}
                   <tr>
-                    <td colspan="7" class="has-text-centered">No deliveries found for this period</td>
+                    <td colspan="4" class="has-text-centered">No deliveries found for this period</td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -528,7 +489,8 @@
     </div>
   </section>
 
-  <!-- Add JavaScript for interactive filtering -->
+  <!-- Add JavaScript for charts and interactivity -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function() {
       // Add responsive behavior for tables on small screens
@@ -547,6 +509,37 @@
           });
         }
       }
+      
+      // Monthly delivery chart
+      const ctx = document.getElementById('monthlyDeliveryChart').getContext('2d');
+      const monthlyLabels = {{ monthly_labels|safe }};
+      const monthlyData = {{ monthly_counts|safe }};
+      
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: monthlyLabels,
+          datasets: [{
+            label: 'Deliveries',
+            data: monthlyData,
+            backgroundColor: 'rgba(0, 128, 255, 0.7)',
+            borderColor: 'rgb(0, 128, 255)',
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: {
+                precision: 0
+              }
+            }
+          }
+        }
+      });
       
       // Run once on load
       adjustTables();

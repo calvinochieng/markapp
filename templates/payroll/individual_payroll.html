@@ -215,7 +215,7 @@
       </div>
       <div class="column is-3">
         <div class="dashboard-card box">
-          <p class="has-text-grey">Role Payment</p>
+          <p class="has-text-grey">Turnboy Payment</p>
           <p class="stat-number">Ksh {{ staff_data.role_payment|floatformat:2 }}</p>
           <p class="has-text-success">{{ selected_staff.get_role_display }}</p>
         </div>
@@ -294,7 +294,7 @@
             <tr>
               <th>Date</th>
               <th>Vehicle</th>
-              <th>Route</th>
+              <th>Destination</th>
               <th>Role Payment</th>
               <th>Loader Payment</th>
               <th>Total Payment</th>
@@ -304,8 +304,8 @@
             {% for record in staff_data.deliveries %}
             <tr class="delivery-detail">
               <td>{{ record.delivery.date|date:"M d, Y" }}</td>
-              <td>{{ record.delivery.vehicle.name|default:"N/A" }}</td>
-              <td>{{ record.delivery.route|default:"N/A" }}</td>
+              <td><a href="/admin/app/delivery/{{record.delivery.id}}/change/">{{ record.delivery.vehicle.plate_number|default:"N/A" }}</a> </td>
+              <td>{{ record.delivery.destination|default:"N/A" }}:{{record.delivery.items_carried}}</td>
               <td>Ksh {{ record.role_pay|floatformat:2 }}</td>
               <td>Ksh {{ record.loader_pay|floatformat:2 }}</td>
               <td><strong>Ksh {{ record.total_pay|floatformat:2 }}</strong></td>
